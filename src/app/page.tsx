@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 export default function Home() {
   const [text, setText] = useState("");
   const [outline, setOutline] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const { isSignedIn } = useUser();
 
   async function handleGenerate() {
     setError("");
@@ -54,12 +56,23 @@ export default function Home() {
             粘贴课件 / 笔记文本，一键生成结构化复习提纲。
           </p>
         </div>
-        <Link
-          href="/pricing"
-          className="shrink-0 rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
-        >
-          定价
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/pricing"
+            className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+          >
+            定价
+          </Link>
+          {isSignedIn ? (
+            <UserButton />
+          ) : (
+            <SignInButton mode="modal">
+              <button className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700">
+                登录
+              </button>
+            </SignInButton>
+          )}
+        </div>
       </header>
 
       <section className="flex flex-col gap-2">

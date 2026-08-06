@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { getServerSupabase } from "@/lib/supabase";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
-// 匿名用户每日免费生成次数上限（登录用户由 Clerk userId 提升，见下方注释）
+// 匿名用户每日免费生成次数上限
 const DAILY_LIMIT_ANON = 5;
+// 登录用户每日上限（更高，鼓励注册）
+const DAILY_LIMIT_USER = 20;
 // 滚动窗口（小时）：按最近 24 小时计数，避免跨零点清零的体验问题
 const WINDOW_HOURS = 24;
 
@@ -37,14 +40,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "文本不能为空。" }, { status: 400 });
   }
 
-  // 限次检查（按客户端 IP，匿名用户）
+  // 身份识别：Clerk 登录用户拿 userId，否则按 IP 限次
+  const { userId } = await auth();
   const ip = getClientIp(req);
-  if (ip) {
-    const rl = await checkRateLimit(ip);
+
+  if (userId) {
+    const rl = await checkRateLimit(userId, "user_id", DAILY_LIMIT_USER);
     if (!rl.ok) {
       return NextResponse.json(
         {
-          error: `今日免费次数已用完（${DAILY_LIMIT_ANON} 次/天）。升级会员可无限使用，详见定价页。`,
+          error: `今日生成次数已用完（会员 ${DAILY_LIMIT_USER} 次/天）。明日可继续使用。`,
+          code: "RATE_LIMIT",
+          remaining: 0,
+        },
+        { status: 429 },
+      );
+    }
+  } else if (ip) {
+    const rl = await checkRateLimit(ip, "ip", DAILY_LIMIT_ANON);
+    if (!rl.ok) {
+      return NextResponse.json(
+        {
+          error: `今日免费次数已用完（${DAILY_LIMIT_ANON} 次/天）。登录可提升到 ${DAILY_LIMIT_USER} 次/天，或查看会员方案。`,
           code: "RATE_LIMIT",
           remaining: 0,
         },
@@ -84,7 +101,7 @@ export async function POST(req: NextRequest) {
       data?.choices?.[0]?.message?.content?.trim() || "";
 
     // 优雅降级：记录使用量，失败不影响主流程返回
-    void recordUsage(text.length, ip);
+    void recordUsage(text.length, ip, userId);
 
     return NextResponse.json({ outline });
   } catch {
@@ -101,7 +118,11 @@ function getClientIp(req: NextRequest): string | null {
   return req.headers.get("x-real-ip") || null;
 }
 
-async function checkRateLimit(ip: string): Promise<{ ok: boolean; count: number }> {
+async function checkRateLimit(
+  identifier: string,
+  column: "ip" | "user_id",
+  limit: number,
+): Promise<{ ok: boolean; count: number }> {
   try {
     const supabase = getServerSupabase();
     if (!supabase) return { ok: true, count: 0 }; // 无 DB 时降级放行
@@ -111,17 +132,21 @@ async function checkRateLimit(ip: string): Promise<{ ok: boolean; count: number 
     const { count, error } = await supabase
       .from("usage")
       .select("*", { count: "exact", head: true })
-      .eq("ip", ip)
+      .eq(column, identifier)
       .gte("created_at", since);
     if (error) return { ok: true, count: 0 };
     const c = count ?? 0;
-    return { ok: c < DAILY_LIMIT_ANON, count: c };
+    return { ok: c < limit, count: c };
   } catch {
     return { ok: true, count: 0 };
   }
 }
 
-async function recordUsage(inputChars: number, ip: string | null) {
+async function recordUsage(
+  inputChars: number,
+  ip: string | null,
+  userId: string | null,
+) {
   try {
     const supabase = getServerSupabase();
     if (!supabase) return;
@@ -129,6 +154,7 @@ async function recordUsage(inputChars: number, ip: string | null) {
       model: "deepseek-chat",
       input_chars: inputChars,
       ip: ip ?? null,
+      user_id: userId ?? null,
     });
   } catch (e) {
     console.error("[usage] 写入失败（已忽略）:", (e as Error).message);
