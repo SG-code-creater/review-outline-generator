@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     if (!rl.ok) {
       return NextResponse.json(
         {
-          error: `今日免费次数已用完（${DAILY_LIMIT_ANON} 次/天）。登录可提升到 ${DAILY_LIMIT_USER} 次/天，或查看会员方案。`,
+          error: `今日免费次数已用完（${DAILY_LIMIT_ANON} 次/天）。登录可提升到 ${DAILY_LIMIT_USER} 次/天。`,
           code: "RATE_LIMIT",
           remaining: 0,
         },

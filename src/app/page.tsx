@@ -1,8 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+
+// 规划中的学习工具板块（陆续上线，先以卡片占位，不接真实功能）
+const FEATURES = [
+  {
+    title: "错题本整理",
+    desc: "拍照或粘贴错题，自动归类知识点与易错原因，生成专属错题集。",
+  },
+  {
+    title: "知识点卡片",
+    desc: "把长篇笔记拆成可记忆的小卡片，支持间隔重复复习。",
+  },
+  {
+    title: "PDF 智能问答",
+    desc: "上传课件 PDF，直接提问，基于原文给出带出处的答案。",
+  },
+  {
+    title: "单词背诵助手",
+    desc: "按词频与考频生成背诵清单，配合测验巩固记忆。",
+  },
+  {
+    title: "试卷分析",
+    desc: "上传试卷，定位薄弱章节并推荐针对性练习。",
+  },
+  {
+    title: "考试倒计时",
+    desc: "设置考试日期，自动规划每日复习节奏与提醒。",
+  },
+];
 
 export default function Home() {
   const [text, setText] = useState("");
@@ -37,9 +64,6 @@ export default function Home() {
     }
   }
 
-  // 是否触发了限次（429 + RATE_LIMIT）
-  const isRateLimited = error.includes("免费次数已用完");
-
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-12">
       <header className="flex items-start justify-between gap-4">
@@ -57,12 +81,6 @@ export default function Home() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Link
-            href="/pricing"
-            className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
-          >
-            定价
-          </Link>
           {isSignedIn ? (
             <UserButton />
           ) : (
@@ -98,14 +116,6 @@ export default function Home() {
       {error && (
         <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           <p>{error}</p>
-          {isRateLimited && (
-            <Link
-              href="/pricing"
-              className="mt-1 inline-block font-medium text-red-700 underline"
-            >
-              查看会员方案 →
-            </Link>
-          )}
         </div>
       )}
 
@@ -125,6 +135,34 @@ export default function Home() {
           </pre>
         </section>
       )}
+
+      {/* 更多学习工具板块（陆续上线） */}
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900">更多学习工具</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            学盒正在长成你的全能学习助手，以下功能陆续上线。
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((f) => (
+            <div
+              key={f.title}
+              className="flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-base font-semibold text-zinc-900">
+                  {f.title}
+                </h3>
+                <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
+                  即将上线
+                </span>
+              </div>
+              <p className="text-sm leading-6 text-zinc-500">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
