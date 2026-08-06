@@ -8,7 +8,7 @@ export default function Pricing() {
           学盒 · 会员方案
         </h1>
         <p className="mt-2 text-sm text-zinc-500">
-          免费先用，会员无限生成。一杯奶茶钱，承包你整个学期的复习。
+          当前为公开测试版，所有功能免费可用，无需付费即可体验。
         </p>
       </header>
 
