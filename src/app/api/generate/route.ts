@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { verifyToken } from "@clerk/nextjs/server";
 import { getServerSupabase } from "@/lib/supabase";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "文本不能为空。" }, { status: 400 });
   }
 
-  // 身份识别：Clerk 登录用户拿 userId，否则按 IP 限次
-  const { userId } = await auth();
+  // 身份识别：Clerk 登录用户拿 userId（手动校验 cookie，避免 EdgeOne proxy 运行时与 clerkMiddleware 不兼容），否则按 IP 限次
+  const userId = await getUserId(req);
   const ip = getClientIp(req);
 
   if (userId) {
@@ -116,6 +116,28 @@ function getClientIp(req: NextRequest): string | null {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0]?.trim() || null;
   return req.headers.get("x-real-ip") || null;
+}
+
+// 手动校验 Clerk 登录态：读 __session cookie（或 Authorization Bearer），verifyToken 验 JWT
+// 不依赖 clerkMiddleware，规避 EdgeOne proxy 运行时对 RequestInit.eo 字段的校验报错
+async function getUserId(req: NextRequest): Promise<string | null> {
+  try {
+    const cookieToken =
+      req.cookies.get("__session")?.value ||
+      req.cookies.get("__clerk_session")?.value;
+    const authHeader = req.headers.get("authorization");
+    const bearer = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : null;
+    const token = cookieToken || bearer;
+    if (!token) return null;
+    const claims = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+    return (claims.sub as string) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function checkRateLimit(
