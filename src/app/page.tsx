@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 export default function Home() {
   const [text, setText] = useState("");
@@ -34,15 +35,26 @@ export default function Home() {
     }
   }
 
+  // 是否触发了限次（429 + RATE_LIMIT）
+  const isRateLimited = error.includes("免费次数已用完");
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-12">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          复习提纲生成器
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          粘贴课件 / 笔记文本，一键生成结构化复习提纲。
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+            复习提纲生成器
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            粘贴课件 / 笔记文本，一键生成结构化复习提纲。
+          </p>
+        </div>
+        <Link
+          href="/pricing"
+          className="shrink-0 rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+        >
+          定价
+        </Link>
       </header>
 
       <section className="flex flex-col gap-2">
@@ -66,9 +78,17 @@ export default function Home() {
       </section>
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-          {error}
-        </p>
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          <p>{error}</p>
+          {isRateLimited && (
+            <Link
+              href="/pricing"
+              className="mt-1 inline-block font-medium text-red-700 underline"
+            >
+              查看会员方案 →
+            </Link>
+          )}
+        </div>
       )}
 
       {outline && (

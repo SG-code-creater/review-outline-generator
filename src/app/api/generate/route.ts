@@ -3,6 +3,11 @@ import { getServerSupabase } from "@/lib/supabase";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
+// 匿名用户每日免费生成次数上限（登录用户由 Clerk userId 提升，见下方注释）
+const DAILY_LIMIT_ANON = 5;
+// 滚动窗口（小时）：按最近 24 小时计数，避免跨零点清零的体验问题
+const WINDOW_HOURS = 24;
+
 const SYSTEM_PROMPT =
   "你是一个复习提纲生成助手。请把用户提供的课件或笔记文本，整理成结构清晰、层级分明的 Markdown 复习提纲。" +
   "要求：1）用 # / ## / ### 表示章节与知识点的层级；2）保留关键术语、定义、公式与易错点；" +
@@ -30,6 +35,22 @@ export async function POST(req: NextRequest) {
 
   if (!text.trim()) {
     return NextResponse.json({ error: "文本不能为空。" }, { status: 400 });
+  }
+
+  // 限次检查（按客户端 IP，匿名用户）
+  const ip = getClientIp(req);
+  if (ip) {
+    const rl = await checkRateLimit(ip);
+    if (!rl.ok) {
+      return NextResponse.json(
+        {
+          error: `今日免费次数已用完（${DAILY_LIMIT_ANON} 次/天）。升级会员可无限使用，详见定价页。`,
+          code: "RATE_LIMIT",
+          remaining: 0,
+        },
+        { status: 429 },
+      );
+    }
   }
 
   try {
@@ -63,7 +84,7 @@ export async function POST(req: NextRequest) {
       data?.choices?.[0]?.message?.content?.trim() || "";
 
     // 优雅降级：记录使用量，失败不影响主流程返回
-    void recordUsage(text.length);
+    void recordUsage(text.length, ip);
 
     return NextResponse.json({ outline });
   } catch {
@@ -74,13 +95,40 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function recordUsage(inputChars: number) {
+function getClientIp(req: NextRequest): string | null {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() || null;
+  return req.headers.get("x-real-ip") || null;
+}
+
+async function checkRateLimit(ip: string): Promise<{ ok: boolean; count: number }> {
+  try {
+    const supabase = getServerSupabase();
+    if (!supabase) return { ok: true, count: 0 }; // 无 DB 时降级放行
+    const since = new Date(
+      Date.now() - WINDOW_HOURS * 3600 * 1000,
+    ).toISOString();
+    const { count, error } = await supabase
+      .from("usage")
+      .select("*", { count: "exact", head: true })
+      .eq("ip", ip)
+      .gte("created_at", since);
+    if (error) return { ok: true, count: 0 };
+    const c = count ?? 0;
+    return { ok: c < DAILY_LIMIT_ANON, count: c };
+  } catch {
+    return { ok: true, count: 0 };
+  }
+}
+
+async function recordUsage(inputChars: number, ip: string | null) {
   try {
     const supabase = getServerSupabase();
     if (!supabase) return;
     await supabase.from("usage").insert({
       model: "deepseek-chat",
       input_chars: inputChars,
+      ip: ip ?? null,
     });
   } catch (e) {
     console.error("[usage] 写入失败（已忽略）:", (e as Error).message);
