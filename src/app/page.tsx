@@ -566,10 +566,43 @@ export default function Home() {
     const worker = await createWorker("chi_sim+eng");
     try {
       const { data } = await worker.recognize(file);
-      return data.text || "";
+      return cleanOcrText(data.text || "");
     } finally {
       await worker.terminate();
     }
+  }
+
+  /** 清理 OCR 输出：去除 CJK 字符间的多余空格，修正常见识别错误 */
+  function cleanOcrText(raw: string): string {
+    let text = raw;
+    // 1. 去除 CJK 字符/标点之间的空格（tesseract 默认每个汉字间插空格）
+    //    保留英文单词内部和中文与英文之间的正常空格
+    text = text.replace(
+      /([\u2E80-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\uFF00-\uFFEF])\s+(?=[\u2E80-\u9FFF\u3400-\u4DBF\uF900-\uFAFF\uFF00-\uFFEF])/g,
+      "$1"
+    );
+    // 2. 去除行首行尾空格，合并连续空白行（PDF 多栏/换行产生大量空行）
+    text = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join("\n");
+    // 3. 合并过短的断行（<15 字符且不以句号结尾 → 可能是中间折行）
+    const lines = text.split("\n");
+    const merged: string[] = [];
+    for (const line of lines) {
+      if (
+        merged.length > 0 &&
+        line.length < 15 &&
+        !/[。！？]$/.test(merged[merged.length - 1])
+      ) {
+        merged[merged.length - 1] += line;
+      } else {
+        merged.push(line);
+      }
+    }
+    text = merged.join("\n");
+    return text;
   }
 
   return (
