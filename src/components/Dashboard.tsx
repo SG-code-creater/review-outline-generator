@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { useStudyStats } from "@/lib/useStudyStats";
 
 /* ══════════════════════════════════════════════════════════════
-   学盒 xuebox — 可自由搭配的仪表盘组件
-   学生可在顶栏「自定义」面板里自由开关 / 拖拽排序这些 widget
+   学盒 xuebox — 可自由布局的仪表盘
+   · 卡片可拖动手柄移动位置、拖右下角调整大小（自由度高）
+   · 布局/开关持久化到 localStorage
+   · 连续打卡 / 学习趋势 / 学习概览 接入真实后端统计（/api/stats）
    ══════════════════════════════════════════════════════════════ */
 
 // ─── Widget 元数据 ───
@@ -18,26 +21,63 @@ type WidgetKey =
   | "clock"     // 日期时钟
   | "countdown" // 目标倒计时
   | "calendar"  // 迷你日历
-  | "stats";    // 学习概览
+  | "stats";    // 学习概览（真实数据）
 
 const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc: string }> = {
   welcome:   { label: "问候与座右铭", icon: "💡", desc: "时段问候 + 可编辑座右铭 + 每日语录" },
   weather:   { label: "天气", icon: "🌤️", desc: "当前城市天气（无需密钥）" },
   tasks:     { label: "今日任务", icon: "✅", desc: "随手记今日待办，本地保存" },
   pomodoro:  { label: "番茄钟", icon: "⏳", desc: "25/5 专注计时，提升专注" },
-  trend:     { label: "学习趋势", icon: "📈", desc: "每日学习量与记忆保持率" },
-  streak:    { label: "连续打卡", icon: "🔥", desc: "展示连续学习天数" },
+  trend:     { label: "学习趋势", icon: "📈", desc: "每日学习量与记忆保持率（真实数据）" },
+  streak:    { label: "连续打卡", icon: "🔥", desc: "连续学习天数（真实数据）" },
   clock:     { label: "日期时钟", icon: "🕐", desc: "实时日期 / 星期 / 时间" },
   countdown: { label: "目标倒计时", icon: "🎯", desc: "设置考试/目标，看剩余天数" },
   calendar:  { label: "迷你日历", icon: "📅", desc: "本月日历，标记今天" },
-  stats:     { label: "学习概览", icon: "📊", desc: "今日任务 / 打卡 等速览" },
+  stats:     { label: "学习概览", icon: "📊", desc: "知识点卡 / 复习 / 保持率（真实数据）" },
 };
 
-// 默认开启的 widget（其余在「自定义」里手动加）
-const DEFAULT_ORDER: WidgetKey[] = ["welcome", "weather", "tasks", "pomodoro", "trend", "streak"];
+// ─── 自由布局：每个卡片的 {x,y,w,h}（以 12 列网格为单位） ───
+type LayoutItem = { i: WidgetKey; x: number; y: number; w: number; h: number };
 
-// 独占整行的 widget（内容需要横向空间）；其余统一单列等高，消除"不规则"碎片感
-const WIDE: Set<WidgetKey> = new Set(["trend"]);
+// 所有卡片的默认位置（开启新卡片时使用）
+const WIDGET_DEFAULT_POS: Record<WidgetKey, LayoutItem> = {
+  welcome:   { i: "welcome",   x: 0,  y: 0,  w: 4, h: 3 },
+  weather:   { i: "weather",   x: 4,  y: 0,  w: 3, h: 3 },
+  streak:    { i: "streak",    x: 7,  y: 0,  w: 2, h: 3 },
+  pomodoro:  { i: "pomodoro",  x: 9,  y: 0,  w: 3, h: 4 },
+  tasks:     { i: "tasks",     x: 0,  y: 3,  w: 5, h: 5 },
+  trend:     { i: "trend",     x: 5,  y: 3,  w: 7, h: 5 },
+  stats:     { i: "stats",     x: 0,  y: 8,  w: 4, h: 4 },
+  clock:     { i: "clock",     x: 4,  y: 8,  w: 3, h: 4 },
+  countdown: { i: "countdown", x: 7,  y: 8,  w: 5, h: 4 },
+  calendar:  { i: "calendar",  x: 0,  y: 12, w: 4, h: 4 },
+};
+
+// 默认展示的 6 个卡片（其余在「自定义」里手动加）
+const DEFAULT_LAYOUT: LayoutItem[] = [
+  WIDGET_DEFAULT_POS.welcome,
+  WIDGET_DEFAULT_POS.weather,
+  WIDGET_DEFAULT_POS.streak,
+  WIDGET_DEFAULT_POS.pomodoro,
+  WIDGET_DEFAULT_POS.tasks,
+  WIDGET_DEFAULT_POS.trend,
+];
+
+// ─── 后端真实统计（传给需要真实数据的 widget） ───
+type Backend = {
+  loggedIn: boolean;
+  loading: boolean;
+  streak: number;
+  daily: { date: string; count: number }[];
+  retentionSeries: number[];
+  totalCards: number;
+  reviewedCards: number;
+  masteredPct: number;
+  dueCards: number;
+  totalOutlines: number;
+  daysActive: number;
+  dbReady: boolean;
+};
 
 const QUOTES = [
   "每一步都在靠近更好的自己。",
@@ -74,8 +114,8 @@ function makeCurve(seed: number, base: number, amp: number, trend: number) {
 // 轻量折线图（渐变填充 + 光点）
 function TrendChart({ words, retention }: { words: number[]; retention: number[] }) {
   const W = 560, H = 170, pad = 10;
-  const len = Math.max(words.length, retention.length);
-  const xStep = (W - pad * 2) / (len - 1);
+  const len = Math.max(words.length, retention.length, 1);
+  const xStep = len > 1 ? (W - pad * 2) / (len - 1) : 0;
   const toPath = (data: number[], max: number, scale = 1) => {
     const m = Math.max(max, 1);
     return data.map((d, i) => {
@@ -102,19 +142,26 @@ function TrendChart({ words, retention }: { words: number[]; retention: number[]
       <path d={wArea} fill="url(#cgW)" />
       <path d={wPath} fill="none" stroke="var(--accent-teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d={rPath} fill="none" stroke="var(--accent-purple)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={W - pad} cy={H - pad - (retention[len - 1] / 100) * (H - pad * 2)} r="3.5" fill="var(--accent-purple)" />
-      <circle cx={W - pad} cy={H - pad - (words[len - 1] / wMax) * (H - pad * 2) * 0.9} r="3.5" fill="var(--accent-teal)" />
+      {len > 0 && (
+        <>
+          <circle cx={W - pad} cy={H - pad - (retention[len - 1] / 100) * (H - pad * 2)} r="3.5" fill="var(--accent-purple)" />
+          <circle cx={W - pad} cy={H - pad - (words[len - 1] / wMax) * (H - pad * 2) * 0.9} r="3.5" fill="var(--accent-teal)" />
+        </>
+      )}
     </svg>
   );
 }
 
-/* ─── 单个 Widget 外壳（h-full + justify-between，让每行卡片等高对齐，消除碎片感） ─── */
-function WidgetShell({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+/* ─── 单个 Widget 外壳 ─── */
+function WidgetShell({ title, icon, children, badge }: { title: string; icon: string; children: React.ReactNode; badge?: React.ReactNode }) {
   return (
-    <div className="glass-card flex h-full flex-col gap-3 p-4 sm:p-5">
-      <div className="flex items-center gap-2">
-        <span className="text-base">{icon}</span>
-        <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{title}</h3>
+    <div className="glass-card flex h-full flex-col gap-3 overflow-hidden p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{title}</h3>
+        </div>
+        {badge}
       </div>
       {children}
     </div>
@@ -177,7 +224,6 @@ function WeatherWidget() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    // 优先用浏览器地理；失败则用中国默认城市（IP 定位免 key 不稳，给个默认）
     const fallback = () => fetchWeather(39.9, 116.4, "北京");
     if (!navigator.geolocation) { fallback(); return; }
     navigator.geolocation.getCurrentPosition(
@@ -195,7 +241,7 @@ function WeatherWidget() {
         const t = Math.round(j.current.temperature_2m);
         const code = j.current.weather_code;
         setData({ temp: t, desc: weatherDesc(code), city: cityName || "当前位置", icon: weatherIcon(code) });
-      } catch (e) {
+      } catch {
         setErr("天气获取失败");
       }
     }
@@ -253,7 +299,7 @@ function TasksWidget() {
         />
         <button onClick={add} className="btn-primary-glow px-3 py-1.5 text-sm">添加</button>
       </div>
-      <div className="flex flex-col gap-1.5 max-h-40 overflow-auto">
+      <div className="flex flex-1 flex-col gap-1.5 overflow-auto">
         {tasks.length === 0 && <p className="text-xs" style={{ color: "var(--text-muted)" }}>还没有任务，写下今天要完成的事吧。</p>}
         {tasks.map((t) => (
           <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: t.done ? "var(--text-muted)" : "var(--text-primary)" }}>
@@ -300,11 +346,21 @@ function PomodoroWidget() {
   );
 }
 
-function TrendWidget() {
-  const words = useMemo(() => makeCurve(1.2, 12, 10, 1.1), []);
-  const retention = useMemo(() => makeCurve(3.7, 55, 20, 2.2).map((v) => Math.min(100, Math.round(v))), []);
+function TrendWidget({ backend }: { backend: Backend }) {
+  const words = useMemo(
+    () => (backend.loggedIn && backend.daily.length ? backend.daily.map((d) => d.count) : makeCurve(1.2, 12, 10, 1.1)),
+    [backend.loggedIn, backend.daily],
+  );
+  const retention = useMemo(
+    () => (backend.loggedIn && backend.retentionSeries.length ? backend.retentionSeries : makeCurve(3.7, 55, 20, 2.2).map((v) => Math.min(100, Math.round(v)))),
+    [backend.loggedIn, backend.retentionSeries],
+  );
   return (
-    <WidgetShell title="学习趋势" icon="📈">
+    <WidgetShell
+      title="学习趋势"
+      icon="📈"
+      badge={backend.loggedIn ? <span className="glass-badge glass-badge-live">真实数据</span> : undefined}
+    >
       <div className="flex items-center justify-between text-xs" style={{ color: "var(--text-secondary)" }}>
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--accent-teal)" }} /> 每日学习量</span>
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--accent-purple)" }} /> 记忆保持率</span>
@@ -314,26 +370,32 @@ function TrendWidget() {
   );
 }
 
-function StreakWidget() {
-  const [streak, setStreak] = useState(1);
+function StreakWidget({ backend }: { backend: Backend }) {
+  const [localStreak, setLocalStreak] = useState(1);
   const today = new Date().toISOString().slice(0, 10);
   useEffect(() => {
     try {
       const last = localStorage.getItem("xuebox_streak_last");
       const prev = Number(localStorage.getItem("xuebox_streak") || "1");
-      if (last === today) { setStreak(prev); return; }
+      if (last === today) { setLocalStreak(prev); return; }
       const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
       const next = last === y ? prev + 1 : 1;
-      setStreak(next);
+      setLocalStreak(next);
       localStorage.setItem("xuebox_streak", String(next));
       localStorage.setItem("xuebox_streak_last", today);
     } catch {}
   }, [today]);
 
+  const shown = backend.loggedIn ? (backend.loading ? localStreak : backend.streak) : localStreak;
+
   return (
-    <WidgetShell title="连续打卡" icon="🔥">
+    <WidgetShell
+      title="连续打卡"
+      icon="🔥"
+      badge={backend.loggedIn ? <span className="glass-badge glass-badge-live">真实数据</span> : undefined}
+    >
       <div className="flex items-center justify-between">
-        <span className="text-3xl font-semibold" style={{ color: "var(--accent-coral)" }}>{streak}</span>
+        <span className="text-3xl font-semibold" style={{ color: "var(--accent-coral)" }}>{shown}</span>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>天连续学习</span>
       </div>
       <p className="text-xs" style={{ color: "var(--text-muted)" }}>每天打开学盒就续上 🔥</p>
@@ -444,12 +506,12 @@ function CalendarWidget() {
   );
 }
 
-/* ─── 学习概览（今日任务进度 + 连续打卡） ─── */
-function StatsWidget() {
+/* ─── 学习概览（真实后端数据；未登录回退本地任务） ─── */
+function StatsWidget({ backend }: { backend: Backend }) {
   const [taskDone, setTaskDone] = useState(0);
   const [taskTotal, setTaskTotal] = useState(0);
-  const [streak, setStreak] = useState(1);
   const today = new Date().toISOString().slice(0, 10);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("xuebox_tasks_" + today);
@@ -458,9 +520,46 @@ function StatsWidget() {
         setTaskTotal(arr.length);
         setTaskDone(arr.filter((t) => t.done).length);
       }
-      setStreak(Number(localStorage.getItem("xuebox_streak") || "1"));
     } catch {}
   }, [today]);
+
+  if (backend.loggedIn) {
+    if (!backend.dbReady) {
+      return (
+        <WidgetShell title="学习概览" icon="📊">
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>数据暂未接入，请稍后重试。</p>
+        </WidgetShell>
+      );
+    }
+    const pct = backend.reviewedCards ? Math.round((backend.masteredPct)) : 0;
+    return (
+      <WidgetShell title="学习概览" icon="📊" badge={<span className="glass-badge glass-badge-live">真实数据</span>}>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-xl px-2 py-2 text-center" style={{ background: "rgba(45,212,191,0.07)" }}>
+            <p className="text-lg font-semibold" style={{ color: "var(--accent-teal)" }}>{backend.totalCards}</p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>知识点卡</p>
+          </div>
+          <div className="rounded-xl px-2 py-2 text-center" style={{ background: "rgba(96,165,250,0.07)" }}>
+            <p className="text-lg font-semibold" style={{ color: "var(--accent-blue)" }}>{backend.reviewedCards}</p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>已复习</p>
+          </div>
+          <div className="rounded-xl px-2 py-2 text-center" style={{ background: "rgba(167,139,250,0.07)" }}>
+            <p className="text-lg font-semibold" style={{ color: "var(--accent-purple)" }}>{backend.masteredPct}%</p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>保持率</p>
+          </div>
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          累计学习 {backend.daysActive} 天 · 待复习 {backend.dueCards} 张
+        </p>
+        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
+          <div className="h-full rounded-full transition-all" style={{ width: pct + "%", background: "var(--accent-purple)" }} />
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>已复习卡片记忆保持率 {pct}%</p>
+      </WidgetShell>
+    );
+  }
+
+  // 未登录：展示本地今日任务进度
   const pct = taskTotal ? Math.round((taskDone / taskTotal) * 100) : 0;
   return (
     <WidgetShell title="学习概览" icon="📊">
@@ -470,111 +569,319 @@ function StatsWidget() {
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>今日任务</p>
         </div>
         <div className="rounded-xl px-3 py-2 text-center" style={{ background: "rgba(251,113,133,0.07)" }}>
-          <p className="text-xl font-semibold" style={{ color: "var(--accent-coral)" }}>{streak}天</p>
+          <p className="text-xl font-semibold" style={{ color: "var(--accent-coral)" }}>{localStorage.getItem("xuebox_streak") ?? "1"}天</p>
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>连续打卡</p>
         </div>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
         <div className="h-full rounded-full transition-all" style={{ width: pct + "%", background: "var(--accent-teal)" }} />
       </div>
-      <p className="text-xs" style={{ color: "var(--text-muted)" }}>今日任务完成 {pct}%</p>
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>登录后展示真实学习数据</p>
     </WidgetShell>
   );
 }
 
-const WIDGET_RENDER: Record<WidgetKey, () => React.ReactElement> = {
-  welcome: () => <WelcomeWidget />,
-  weather: () => <WeatherWidget />,
-  tasks: () => <TasksWidget />,
-  pomodoro: () => <PomodoroWidget />,
-  trend: () => <TrendWidget />,
-  streak: () => <StreakWidget />,
-  clock: () => <ClockWidget />,
-  countdown: () => <CountdownWidget />,
-  calendar: () => <CalendarWidget />,
-  stats: () => <StatsWidget />,
-};
+/* ════════════════ 自由布局网格 ════════════════ */
+
+const GAP = 16;
+const ROW_H = 88;
+const MIN_W = 2;
+const MIN_H = 2;
+
+function colsForWidth(w: number) {
+  if (w < 520) return 2;
+  if (w < 768) return 4;
+  if (w < 1024) return 6;
+  if (w < 1280) return 8;
+  return 12;
+}
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
+}
+function overlaps(a: LayoutItem, b: LayoutItem) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+// 把卡片向下推，直到不再与其他卡片重叠（保证自由布局但不乱叠）
+function resolve(item: LayoutItem, others: LayoutItem[]): LayoutItem {
+  let y = item.y;
+  let guard = 0;
+  while (others.some((o) => overlaps({ ...item, y }, o)) && guard < 500) { y++; guard++; }
+  return { ...item, y };
+}
+
+function DashboardGrid({
+  layout,
+  setLayout,
+  editing,
+  renderItem,
+}: {
+  layout: LayoutItem[];
+  setLayout: (next: LayoutItem[]) => void;
+  editing: boolean;
+  renderItem: (k: WidgetKey) => React.ReactElement;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  const [preview, setPreview] = useState<LayoutItem[] | null>(null);
+  const [dragId, setDragId] = useState<WidgetKey | null>(null);
+
+  const dragRef = useRef<{ id: WidgetKey; sx: number; sy: number; orig: LayoutItem } | null>(null);
+  const previewRef = useRef<LayoutItem[] | null>(null);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const dimsRef = useRef({ cols: 12, cw: 0 });
+  const cols = width ? colsForWidth(width) : 12;
+  dimsRef.current = { cols, cw: width ? (width - GAP * (cols - 1)) / cols : 0 };
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // 在首次绘制前量好宽度，避免卡片初始闪烁成小方块
+  const useIso = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+  useIso(() => {
+    if (ref.current) setWidth(ref.current.clientWidth);
+  }, []);
+
+  const commit = useCallback(() => {
+    if (previewRef.current) setLayout(previewRef.current);
+    previewRef.current = null;
+    setPreview(null);
+    setDragId(null);
+    dragRef.current = null;
+  }, [setLayout]);
+
+  const onMove = useCallback((e: PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const { cw, cols: c } = dimsRef.current;
+    if (!cw) return;
+    const dc = Math.round((e.clientX - d.sx) / (cw + GAP));
+    const dr = Math.round((e.clientY - d.sy) / (ROW_H + GAP));
+    const nx = clamp(d.orig.x + dc, 0, c - d.orig.w);
+    const ny = Math.max(0, d.orig.y + dr);
+    const moved = resolve({ ...d.orig, x: nx, y: ny }, layoutRef.current.filter((l) => l.i !== d.id));
+    const next = layoutRef.current.map((l) => (l.i === d.id ? moved : l));
+    previewRef.current = next;
+    setPreview(next);
+  }, []);
+
+  const onUp = useCallback(() => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    commit();
+  }, [onMove, commit]);
+
+  const onResizeMove = useCallback((e: PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const { cw, cols: c } = dimsRef.current;
+    if (!cw) return;
+    const dc = Math.round((e.clientX - d.sx) / (cw + GAP));
+    const dr = Math.round((e.clientY - d.sy) / (ROW_H + GAP));
+    const nw = clamp(d.orig.w + dc, MIN_W, c - d.orig.x);
+    const nh = Math.max(MIN_H, d.orig.h + dr);
+    const resized = resolve({ ...d.orig, w: nw, h: nh }, layoutRef.current.filter((l) => l.i !== d.id));
+    const next = layoutRef.current.map((l) => (l.i === d.id ? resized : l));
+    previewRef.current = next;
+    setPreview(next);
+  }, []);
+
+  const onResizeUp = useCallback(() => {
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", onResizeUp);
+    commit();
+  }, [onResizeMove, commit]);
+
+  const startDrag = (e: React.PointerEvent, id: WidgetKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = layout.find((l) => l.i === id);
+    if (!item) return;
+    dragRef.current = { id, sx: e.clientX, sy: e.clientY, orig: item };
+    setDragId(id);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  const startResize = (e: React.PointerEvent, id: WidgetKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = layout.find((l) => l.i === id);
+    if (!item) return;
+    dragRef.current = { id, sx: e.clientX, sy: e.clientY, orig: item };
+    setDragId(id);
+    window.addEventListener("pointermove", onResizeMove);
+    window.addEventListener("pointerup", onResizeUp);
+  };
+
+  const active = preview ?? layout;
+  const cw = width ? (width - GAP * (cols - 1)) / cols : 0;
+  const geom = (it: LayoutItem) => {
+    const w = Math.min(it.w, cols);
+    const x = Math.min(it.x, cols - w);
+    return {
+      left: x * (cw + GAP),
+      top: it.y * (ROW_H + GAP),
+      pw: w * cw + GAP * (w - 1),
+      ph: it.h * ROW_H + GAP * (it.h - 1),
+    };
+  };
+  const maxBottom = active.reduce((m, it) => Math.max(m, it.y + it.h), 0);
+  const containerH = maxBottom * (ROW_H + GAP) - GAP;
+
+  return (
+    <div ref={ref} data-editing={editing} className="relative w-full" style={{ height: containerH }}>
+      {active.map((it) => {
+        const { left, top, pw, ph } = geom(it);
+        return (
+          <div key={it.i} className="absolute" style={{ left, top, width: pw, height: ph }}>
+            {editing && (
+              <>
+                <button
+                  aria-label="拖动移动"
+                  onPointerDown={(e) => startDrag(e, it.i)}
+                  className="absolute right-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-lg text-sm"
+                  style={{ background: "rgba(45,212,191,0.18)", color: "var(--accent-teal)", cursor: "grab", border: "0.5px solid rgba(45,212,191,0.35)", touchAction: "none" }}
+                >⠿</button>
+                <button
+                  aria-label="拖动调整大小"
+                  onPointerDown={(e) => startResize(e, it.i)}
+                  className="absolute bottom-2 right-2 z-20 flex h-7 w-7 items-center justify-center rounded-lg text-xs"
+                  style={{ background: "rgba(255,255,255,0.10)", color: "var(--text-secondary)", cursor: "nwse-resize", border: "0.5px solid var(--glass-border)", touchAction: "none" }}
+                >⤡</button>
+              </>
+            )}
+            {renderItem(it.i)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /* ════════════════ 主仪表盘（含自定义面板） ════════════════ */
 export default function Dashboard() {
-  const [order, setOrder] = useState<WidgetKey[]>(DEFAULT_ORDER);
-  const [open, setOpen] = useState(false);
+  const { stats, loading } = useStudyStats();
+  const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT);
+  const [editing, setEditing] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("xuebox_dash_order");
-      if (saved) {
-        const parsed = JSON.parse(saved) as WidgetKey[];
-        // 保留已知 key，补回缺失的
-        const known = parsed.filter((k) => k in WIDGET_META);
-        const missing = DEFAULT_ORDER.filter((k) => !known.includes(k));
-        setOrder([...known, ...missing]);
+      const raw = localStorage.getItem("xuebox_dash_layout");
+      if (raw) {
+        const parsed = JSON.parse(raw) as LayoutItem[];
+        const valid = parsed.filter((l) => l.i in WIDGET_META);
+        if (valid.length) setLayout(valid);
       }
     } catch {}
   }, []);
-  const persist = (o: WidgetKey[]) => {
-    setOrder(o);
-    try { localStorage.setItem("xuebox_dash_order", JSON.stringify(o)); } catch {}
+
+  const persist = (next: LayoutItem[]) => {
+    setLayout(next);
+    try { localStorage.setItem("xuebox_dash_layout", JSON.stringify(next)); } catch {}
   };
 
-  const toggle = (k: WidgetKey) => {
-    if (order.includes(k)) persist(order.filter((x) => x !== k));
-    else persist([...order, k]);
+  const enabledKeys = new Set(layout.map((l) => l.i));
+  const toggleWidget = (k: WidgetKey) => {
+    if (enabledKeys.has(k)) {
+      persist(layout.filter((l) => l.i !== k));
+    } else {
+      const maxBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+      const def = WIDGET_DEFAULT_POS[k];
+      persist([...layout, { ...def, y: maxBottom }]);
+    }
   };
-  const move = (k: WidgetKey, dir: -1 | 1) => {
-    const i = order.indexOf(k);
-    const j = i + dir;
-    if (j < 0 || j >= order.length) return;
-    const next = [...order];
-    [next[i], next[j]] = [next[j], next[i]];
-    persist(next);
+  const resetLayout = () => persist(DEFAULT_LAYOUT);
+
+  const backend: Backend = {
+    loggedIn: stats.loggedIn,
+    loading,
+    streak: stats.streak,
+    daily: stats.daily,
+    retentionSeries: stats.retentionSeries,
+    totalCards: stats.totalCards,
+    reviewedCards: stats.reviewedCards,
+    masteredPct: stats.masteredPct,
+    dueCards: stats.dueCards,
+    totalOutlines: stats.totalOutlines,
+    daysActive: stats.daysActive,
+    dbReady: stats.dbReady ?? true,
+  };
+
+  const renderItem = (k: WidgetKey): React.ReactElement => {
+    switch (k) {
+      case "welcome": return <WelcomeWidget />;
+      case "weather": return <WeatherWidget />;
+      case "tasks": return <TasksWidget />;
+      case "pomodoro": return <PomodoroWidget />;
+      case "trend": return <TrendWidget backend={backend} />;
+      case "streak": return <StreakWidget backend={backend} />;
+      case "clock": return <ClockWidget />;
+      case "countdown": return <CountdownWidget />;
+      case "calendar": return <CalendarWidget />;
+      case "stats": return <StatsWidget backend={backend} />;
+    }
   };
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>我的仪表盘</h2>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>按你习惯自由搭配，点右侧「自定义」增删排序。</p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
+            点「自定义」增删组件、开启「自由布局」拖动调整大小与位置。
+          </p>
         </div>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
-          style={{ borderColor: "rgba(45,212,191,0.25)", color: "var(--accent-teal)" }}
-        >
-          ⚙ 自定义
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setEditing((v) => !v)}
+            className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
+            style={editing ? { borderColor: "rgba(45,212,191,0.35)", color: "var(--accent-teal)", background: "rgba(45,212,191,0.08)" } : {}}
+          >
+            ✥ 自由布局{editing ? "：开" : ""}
+          </button>
+          <button
+            onClick={() => setPanelOpen((o) => !o)}
+            className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
+            style={{ borderColor: "rgba(45,212,191,0.25)", color: "var(--accent-teal)" }}
+          >
+            ⚙ 自定义
+          </button>
+        </div>
       </div>
 
-      {open && (
+      {editing && (
+        <p className="glass-badge glass-badge-soon self-start">拖动卡片右上角 ⠿ 移动，右下角 ⤡ 调整大小，自动保存</p>
+      )}
+
+      {panelOpen && (
         <div className="glass-card flex flex-col gap-2 p-4">
-          <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>点击开关组件，用 ↑↓ 调整顺序（自动保存）</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>点击开关组件（自动保存）</p>
+            <button onClick={resetLayout} className="glass-btn px-3 py-1 text-xs">重置布局</button>
+          </div>
           {(Object.keys(WIDGET_META) as WidgetKey[]).map((k) => {
-            const on = order.includes(k);
+            const on = enabledKeys.has(k);
             return (
               <div key={k} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
                    style={{ background: on ? "rgba(45,212,191,0.06)" : "transparent" }}>
                 <label className="flex items-center gap-2 cursor-pointer text-sm" style={{ color: "var(--text-primary)" }}>
-                  <input type="checkbox" checked={on} onChange={() => toggle(k)} className="accent-[var(--accent-teal)]" />
+                  <input type="checkbox" checked={on} onChange={() => toggleWidget(k)} className="accent-[var(--accent-teal)]" />
                   <span>{WIDGET_META[k].icon} {WIDGET_META[k].label}</span>
                 </label>
-                <div className="flex gap-1">
-                  <button onClick={() => move(k, -1)} className="glass-btn px-2 py-0.5 text-xs" disabled={!on}>↑</button>
-                  <button onClick={() => move(k, 1)} className="glass-btn px-2 py-0.5 text-xs" disabled={!on}>↓</button>
-                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      {/* auto-rows-fr + h-full：同一行卡片强制等高，消除高低不齐的"碎片感" */}
-      <div className="grid grid-cols-1 gap-4 auto-rows-fr sm:grid-cols-2 lg:grid-cols-3">
-        {order.map((k) => {
-          const Render = WIDGET_RENDER[k];
-          return <div key={k} className={WIDE.has(k) ? "sm:col-span-2 lg:col-span-3" : "h-full"}>{<Render />}</div>;
-        })}
-      </div>
+      <DashboardGrid layout={layout} setLayout={persist} editing={editing} renderItem={renderItem} />
     </section>
   );
 }

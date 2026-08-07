@@ -286,6 +286,11 @@ body::after {
   border: 0.5px solid var(--glass-border);
 }
 
+/* 自由布局编辑态：拖拽时禁用卡片悬浮位移，避免抖动 */
+[data-editing="true"] .glass-card:hover {
+  transform: none;
+}
+
 /* 数据指标卡 */
 .metric-card {
   background: var(--glass-bg);
