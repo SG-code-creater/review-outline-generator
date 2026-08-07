@@ -1,8 +1,46 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
+import {
+  type Mode,
+  type ReviewView,
+  type CardStatus,
+  type Card,
+  type SavedOutline,
+  type Mistake,
+  type QuizItem,
+} from "@/components/view-types";
+
+// 模式切换骨架屏（懒加载子组件时的占位）
+function ViewSkeleton({ title }: { title: string }) {
+  return (
+    <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+      <div className="h-4 w-24 rounded bg-stone-200" />
+      <div className="flex flex-col gap-3">
+        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
+        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
+        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
+      </div>
+      <span className="text-xs text-stone-400">{title}加载中…</span>
+    </section>
+  );
+}
+
+const QuizView = dynamic(() => import("@/components/QuizView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="自测题" />,
+});
+const ReviewViewComp = dynamic(() => import("@/components/ReviewView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="我的复习" />,
+});
+const MistakesView = dynamic(() => import("@/components/MistakesView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="错题本" />,
+});
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -90,26 +128,6 @@ const FEATURES = [
   },
 ];
 
-type Mode = "outline" | "flashcard" | "review" | "quiz" | "mistakes";
-type ReviewView = "due" | "collection" | "outlines";
-type CardStatus = "all" | "new" | "weak" | "fuzzy" | "mastered";
-
-interface Card {
-  id?: string;
-  question: string;
-  answer: string;
-  topic: string;
-  last_grade?: number | null;
-  tags?: string[];
-}
-
-interface SavedOutline {
-  id: string;
-  title: string;
-  tags: string[];
-  result: { outline?: string } | string;
-  created_at: string;
-}
 
 // ─── 自定义用户菜单（替代 UserButton，规避 EdgeOne 无 middleware 下登出问题）───
 function UserMenu() {
@@ -222,20 +240,6 @@ export default function Home() {
   const [outlineTitleInput, setOutlineTitleInput] = useState("");
   const [outlineTagInput, setOutlineTagInput] = useState("");
 
-  // 错题集（quiz 来源 + 将来 upload 来源，按 origin 分组）
-  interface Mistake {
-    id: string;
-    origin: "quiz" | "upload";
-    question: string;
-    options: string[];
-    answer: number;
-    picked: number | null;
-    explanation: string | null;
-    evidence: string | null;
-    source_text: string;
-    source_title: string | null;
-    created_at: string;
-  }
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [mistakeOrigin, setMistakeOrigin] = useState<"all" | "quiz" | "upload">("all");
   const [mistakeLoading, setMistakeLoading] = useState(false);
@@ -274,13 +278,6 @@ export default function Home() {
   const [tagDraft, setTagDraft] = useState<Record<string, string>>({});
 
   // 自测题（主动回忆）状态
-  interface QuizItem {
-    question: string;
-    options: string[];
-    answer: number;
-    explanation: string;
-    evidence?: string;
-  }
   const [quiz, setQuiz] = useState<QuizItem[]>([]);
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizPicked, setQuizPicked] = useState<number[]>([]); // 每题选中的选项下标，-1 未答
@@ -702,13 +699,6 @@ export default function Home() {
     }
   }
 
-  // 卡片状态徽标
-  function cardStatus(card: Card): { label: string; cls: string } {
-    if (card.last_grade == null) return { label: "未学", cls: "bg-stone-100 text-stone-600" };
-    if (card.last_grade <= 1) return { label: "薄弱", cls: "bg-red-100 text-red-700" };
-    if (card.last_grade === 3) return { label: "模糊", cls: "bg-amber-100 text-amber-700" };
-    return { label: "掌握", cls: "bg-emerald-100 text-emerald-700" };
-  }
 
   // 进入"我的复习"且已登录时，按子视图拉取数据；进入"错题本"则拉错题
   useEffect(() => {
@@ -835,25 +825,6 @@ export default function Home() {
     return text;
   }
 
-  /**
-   * 溯源高亮：在原文中把依据句（evidence）高亮出来。
-   * 纯字符串匹配，无需向量库 / embedding；若依据不在原文中则原样返回。
-   */
-  function highlightSource(src: string, evidence: string | null) {
-    if (!evidence || !src) return src;
-    if (src.indexOf(evidence) === -1) return src;
-    const parts = src.split(evidence);
-    return parts.map((part, i) => (
-      <span key={i}>
-        {part}
-        {i < parts.length - 1 ? (
-          <mark className="rounded bg-amber-200 px-0.5 text-stone-900">
-            {evidence}
-          </mark>
-        ) : null}
-      </span>
-    ));
-  }
 
   return (
     <>
@@ -1168,730 +1139,79 @@ export default function Home() {
 
         {/* ─── 自测题（主动回忆） ─── */}
         {mode === "quiz" && (
-          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-stone-700">
-                {quiz.length > 0 ? `自测题（${quiz.length} 道）` : "自测题"}
-              </h2>
-              {quiz.length > 0 && (
-                <button
-                  onClick={generateQuiz}
-                  disabled={quizLoading}
-                  className="text-xs text-stone-500 underline hover:text-teal-700 disabled:opacity-50"
-                >
-                  重新出题
-                </button>
-              )}
-            </div>
-
-            {quiz.length === 0 ? (
-              <p className="py-6 text-center text-sm text-stone-400">
-                在上方粘贴或上传资料，点击「生成自测题」即可开始主动回忆。
-              </p>
-            ) : (
-              <>
-                <div className="flex flex-col gap-5">
-                  {quiz.map((q, gi) => {
-                    const picked = quizPicked[gi] ?? -1;
-                    const revealed = quizRevealed[gi] ?? false;
-                    return (
-                      <div
-                        key={gi}
-                        className="flex flex-col gap-3 rounded-xl border border-stone-100 bg-stone-50 p-4"
-                      >
-                        <p className="text-sm font-medium leading-relaxed text-stone-900">
-                          {gi + 1}. {q.question}
-                        </p>
-                        <div className="flex flex-col gap-2">
-                          {q.options.map((opt, oi) => {
-                            const isCorrect = oi === q.answer;
-                            const isPicked = picked === oi;
-                            let cls =
-                              "rounded-lg border px-3 py-2 text-sm transition-colors ";
-                            if (!revealed) {
-                              cls +=
-                                "border-stone-200 bg-white text-stone-800 hover:border-teal-400 hover:bg-teal-50 cursor-pointer";
-                            } else if (isCorrect) {
-                              cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
-                            } else if (isPicked) {
-                              cls += "border-red-300 bg-red-50 text-red-700";
-                            } else {
-                              cls += "border-stone-200 bg-white text-stone-400";
-                            }
-                            return (
-                              <button
-                                key={oi}
-                                type="button"
-                                disabled={revealed}
-                                onClick={() => pickQuizOption(gi, oi)}
-                                className={cls}
-                              >
-                                {opt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {revealed && (
-                          <div className="flex flex-col gap-2">
-                            <div
-                              className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                                picked === q.answer
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-amber-50 text-amber-700"
-                              }`}
-                            >
-                              {picked === q.answer ? "✅ 答对了！" : "❌ 答错了。"}{" "}
-                              {q.explanation}
-                            </div>
-                            {/* 溯源：依据引文 */}
-                            {q.evidence ? (
-                              <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
-                                <span className="font-medium text-stone-500">📌 原文依据：</span>
-                                「{q.evidence}」
-                              </div>
-                            ) : null}
-                            {/* 答错 → 收入错题本 */}
-                            {picked !== q.answer &&
-                              (savedQuizIdx.has(gi) ? (
-                                <span className="text-xs font-medium text-emerald-600">
-                                  ✓ 已收入错题本
-                                </span>
-                              ) : !isSignedIn ? (
-                                <a
-                                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
-                                  className="self-start text-xs text-teal-700 underline hover:text-teal-800"
-                                >
-                                  登录后收入错题本
-                                </a>
-                              ) : (
-                                <button
-                                  onClick={() => saveMistake(gi)}
-                                  disabled={saveMistakeState === "saving" && saveMistakeIdx === gi}
-                                  className="self-start rounded-full bg-stone-800 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-stone-900 disabled:opacity-50"
-                                >
-                                  {saveMistakeState === "saving" && saveMistakeIdx === gi
-                                    ? "收录中…"
-                                    : "收入错题本"}
-                                </button>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 计分条 */}
-                <div className="flex items-center justify-between border-t border-stone-100 pt-3">
-                  <span className="text-sm font-medium text-stone-700">
-                    得分：{quizScore().correct} / {quizScore().total}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setQuizPicked([]);
-                      setQuizRevealed([]);
-                    }}
-                    className="rounded-full border border-stone-300 px-3 py-1 text-xs font-medium text-stone-600 hover:border-teal-500 hover:text-teal-700"
-                  >
-                    重新答题
-                  </button>
-                </div>
-              </>
-            )}
-          </section>
+        <QuizView
+          quiz={quiz}
+          quizLoading={quizLoading}
+          quizPicked={quizPicked}
+          quizRevealed={quizRevealed}
+          savedQuizIdx={savedQuizIdx}
+          saveMistakeState={saveMistakeState}
+          saveMistakeIdx={saveMistakeIdx}
+          isSignedIn={isSignedIn}
+          onGenerateQuiz={generateQuiz}
+          onPickOption={pickQuizOption}
+          onSaveMistake={saveMistake}
+          onResetQuiz={() => {
+            setQuizPicked([]);
+            setQuizRevealed([]);
+          }}
+        />
         )}
 
-        {/* ─── 我的复习（间隔重复 + 题集 + 提纲） ─── */}
         {mode === "review" && (
-          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-medium text-stone-700">我的复习</h2>
-
-            {!isSignedIn ? (
-              <div className="flex flex-col items-center gap-3 py-8">
-                <p className="text-sm text-stone-500">
-                  登录后即可保存卡片与提纲，并在此按间隔重复复习。
-                </p>
-                <a
-                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
-                  className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                >
-                  登录
-                </a>
-              </div>
-            ) : (
-              <>
-                {/* 子视图切换 */}
-                <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
-                  {([
-                    ["due", "今日复习"],
-                    ["collection", "卡片题集"],
-                    ["outlines", "我的提纲"],
-                  ] as const).map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => setReviewView(v)}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        reviewView === v
-                          ? "bg-white text-teal-700 shadow-sm"
-                          : "text-stone-600 hover:text-stone-900"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* ── 今日复习（SM-2 到期队列） ── */}
-                {reviewView === "due" &&
-                  (reviewMsg ? (
-                    <div className="py-10 text-center">
-                      <p className="text-lg font-semibold text-stone-900">{reviewMsg}</p>
-                      <button
-                        onClick={loadDueCards}
-                        className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                      >
-                        再看一下
-                      </button>
-                    </div>
-                  ) : reviewLoading && reviewCards.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-                  ) : reviewCards.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm text-stone-500">还没有待复习的卡片。</p>
-                      <p className="mt-1 text-xs text-stone-400">
-                        去「知识点卡片」生成后点击「保存到我的卡片」即可在这里复习。
-                      </p>
-                    </div>
-                  ) : reviewIndex >= reviewCards.length ? (
-                    <div className="py-10 text-center">
-                      <p className="text-lg font-semibold text-stone-900">🎉 本轮复习完成！</p>
-                      <button
-                        onClick={loadDueCards}
-                        className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                      >
-                        刷新待复习
-                      </button>
-                    </div>
-                  ) : (
-                    (() => {
-                      const card = reviewCards[reviewIndex];
-                      const btn =
-                        "flex-1 rounded-lg py-2 text-sm font-medium transition-colors";
-                      return (
-                        <div className="flex flex-col gap-4">
-                          <p className="text-xs text-stone-400">
-                            待复习 {reviewIndex + 1} / {reviewCards.length}
-                          </p>
-                          <div className="flex h-64 flex-col justify-between rounded-xl border border-stone-200 bg-white p-5">
-                            <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
-                              {card?.topic}
-                            </span>
-                            <p className="text-lg font-semibold leading-relaxed text-stone-900">
-                              {card?.question}
-                            </p>
-                            {reviewRevealed ? (
-                              <div className="flex flex-col gap-3">
-                                <p className="border-t border-stone-100 pt-3 text-sm leading-relaxed text-stone-800">
-                                  {card?.answer}
-                                </p>
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => gradeCard(1)}
-                                    className={`${btn} bg-red-50 text-red-600 hover:bg-red-100`}
-                                  >
-                                    忘记
-                                  </button>
-                                  <button
-                                    onClick={() => gradeCard(3)}
-                                    className={`${btn} bg-amber-50 text-amber-700 hover:bg-amber-100`}
-                                  >
-                                    模糊
-                                  </button>
-                                  <button
-                                    onClick={() => gradeCard(5)}
-                                    className={`${btn} bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
-                                  >
-                                    记得
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setReviewRevealed(true)}
-                                className="self-start rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-100"
-                              >
-                                显示答案
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ))}
-
-                {/* ── 卡片题集（全部保存的卡片 + 状态/标签分组） ── */}
-                {reviewView === "collection" &&
-                  (() => {
-                    const filtered = collectionCards.filter((c) => {
-                      if (collectionStatus !== "all") {
-                        const map: Record<string, string> = {
-                          new: "未学",
-                          weak: "薄弱",
-                          fuzzy: "模糊",
-                          mastered: "掌握",
-                        };
-                        if (cardStatus(c).label !== map[collectionStatus]) return false;
-                      }
-                      if (collectionTag && !(c.tags || []).includes(collectionTag))
-                        return false;
-                      return true;
-                    });
-                    const statusTabs: { v: CardStatus; label: string }[] = [
-                      { v: "all", label: "全部" },
-                      { v: "new", label: "未学" },
-                      { v: "weak", label: "薄弱" },
-                      { v: "fuzzy", label: "模糊" },
-                      { v: "mastered", label: "掌握" },
-                    ];
-                    return (
-                      <div className="flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {statusTabs.map((t) => (
-                            <button
-                              key={t.v}
-                              onClick={() => {
-                                setCollectionStatus(t.v);
-                                setCollectionTag(null);
-                              }}
-                              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                collectionStatus === t.v
-                                  ? "bg-teal-700 text-white shadow-sm"
-                                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                              }`}
-                            >
-                              {t.label}
-                            </button>
-                          ))}
-                          {allTags.length > 0 && (
-                            <span className="mx-1 text-xs text-stone-300">|</span>
-                          )}
-                          {allTags.map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => setCollectionTag(t)}
-                              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                collectionTag === t
-                                  ? "bg-teal-100 text-teal-700 ring-1 ring-teal-300"
-                                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                              }`}
-                            >
-                              #{t}
-                            </button>
-                          ))}
-                          {collectionTag && (
-                            <button
-                              onClick={() => setCollectionTag(null)}
-                              className="text-xs text-stone-400 underline hover:text-stone-600"
-                            >
-                              清除标签
-                            </button>
-                          )}
-                        </div>
-
-                        {collectionLoading && collectionCards.length === 0 ? (
-                          <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-                        ) : collectionCards.length === 0 ? (
-                          <div className="py-10 text-center">
-                            <p className="text-sm text-stone-500">还没有保存的卡片。</p>
-                            <p className="mt-1 text-xs text-stone-400">
-                              去「知识点卡片」生成后点击「保存到我的卡片」。
-                            </p>
-                          </div>
-                        ) : filtered.length === 0 ? (
-                          <p className="py-8 text-center text-sm text-stone-400">
-                            该筛选下没有卡片。
-                          </p>
-                        ) : (
-                          <div className="flex flex-col gap-3">
-                            <p className="text-xs text-stone-400">
-                              共 {filtered.length} 张
-                            </p>
-                            {filtered.map((c) => (
-                              <div
-                                key={c.id}
-                                className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">
-                                      {c.topic}
-                                    </span>
-                                    <span
-                                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${cardStatus(c).cls}`}
-                                    >
-                                      {cardStatus(c).label}
-                                    </span>
-                                  </div>
-                                  <button
-                                    onClick={() => deleteCard(c.id!)}
-                                    className="text-xs text-stone-400 hover:text-red-600"
-                                  >
-                                    删除
-                                  </button>
-                                </div>
-                                <p className="text-sm font-medium text-stone-900">
-                                  {c.question}
-                                </p>
-                                <p className="text-sm leading-relaxed text-stone-600">
-                                  {c.answer}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {(c.tags || []).map((t) => (
-                                    <span
-                                      key={t}
-                                      className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600"
-                                    >
-                                      #{t}
-                                      <button
-                                        onClick={() =>
-                                          updateCardTags(
-                                            c.id!,
-                                            (c.tags || []).filter((x) => x !== t),
-                                          )
-                                        }
-                                        className="text-stone-400 hover:text-red-600"
-                                      >
-                                        ×
-                                      </button>
-                                    </span>
-                                  ))}
-                                  <input
-                                    value={tagDraft[c.id!] || ""}
-                                    onChange={(e) =>
-                                      setTagDraft((p) => ({
-                                        ...p,
-                                        [c.id!]: e.target.value,
-                                      }))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        const v = e.currentTarget.value.trim();
-                                        if (v && !(c.tags || []).includes(v)) {
-                                          updateCardTags(c.id!, [
-                                            ...(c.tags || []),
-                                            v,
-                                          ]);
-                                        }
-                                        setTagDraft((p) => ({ ...p, [c.id!]: "" }));
-                                      }
-                                    }}
-                                    placeholder="加标签"
-                                    className="w-20 rounded-full border border-stone-200 px-2 py-0.5 text-xs outline-none focus:border-teal-500"
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                {/* ── 我的提纲（收藏的提纲） ── */}
-                {reviewView === "outlines" &&
-                  (outlineLoading && outlines.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-                  ) : outlines.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm text-stone-500">还没有收藏的提纲。</p>
-                      <p className="mt-1 text-xs text-stone-400">
-                        在「提纲生成」生成后点击「保存到我的提纲」即可沉淀到这里。
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {outlines.map((o) => (
-                        <div
-                          key={o.id}
-                          className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <h3 className="text-sm font-semibold text-stone-900">
-                              {o.title}
-                            </h3>
-                            <button
-                              onClick={() => deleteOutline(o.id)}
-                              className="text-xs text-stone-400 hover:text-red-600"
-                            >
-                              删除
-                            </button>
-                          </div>
-                          <p className="text-xs text-stone-400">
-                            {new Date(o.created_at).toLocaleDateString()}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-1">
-                            {(o.tags || []).map((t) => (
-                              <span
-                                key={t}
-                                className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600"
-                              >
-                                #{t}
-                              </span>
-                            ))}
-                          </div>
-                          {outlineViewId === o.id ? (
-                            <>
-                              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-stone-100 bg-stone-50 p-3 text-sm leading-7 text-stone-800">
-                                {typeof o.result === "string"
-                                  ? o.result
-                                  : o.result?.outline || ""}
-                              </pre>
-                              <button
-                                onClick={() => setOutlineViewId(null)}
-                                className="self-start text-xs text-stone-500 underline hover:text-stone-700"
-                              >
-                                收起
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => setOutlineViewId(o.id)}
-                              className="self-start text-xs text-teal-700 underline hover:text-teal-800"
-                            >
-                              展开查看
-                            </button>
-                          )}
-                          <button
-                            onClick={() =>
-                              downloadFile(
-                                `${o.title}.md`,
-                                typeof o.result === "string"
-                                  ? o.result
-                                  : o.result?.outline || "",
-                                "text/markdown",
-                              )
-                            }
-                            className="self-start text-xs text-stone-500 underline hover:text-stone-700"
-                          >
-                            下载 .md
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-
-                {/* 错题集已升级为顶级「📕 错题本」Tab（见下方 mode === "mistakes" 区块） */}
-              </>
-            )}
-          </section>
+        <ReviewViewComp
+          isSignedIn={isSignedIn}
+          reviewView={reviewView}
+          setReviewView={setReviewView}
+          reviewMsg={reviewMsg}
+          reviewLoading={reviewLoading}
+          reviewCards={reviewCards}
+          reviewIndex={reviewIndex}
+          reviewRevealed={reviewRevealed}
+          setReviewRevealed={setReviewRevealed}
+          loadDueCards={loadDueCards}
+          gradeCard={gradeCard}
+          collectionCards={collectionCards}
+          collectionStatus={collectionStatus}
+          setCollectionStatus={setCollectionStatus}
+          collectionTag={collectionTag}
+          setCollectionTag={setCollectionTag}
+          allTags={allTags}
+          collectionLoading={collectionLoading}
+          deleteCard={deleteCard}
+          updateCardTags={updateCardTags}
+          tagDraft={tagDraft}
+          setTagDraft={setTagDraft}
+          outlineLoading={outlineLoading}
+          outlines={outlines}
+          deleteOutline={deleteOutline}
+          outlineViewId={outlineViewId}
+          setOutlineViewId={setOutlineViewId}
+          downloadFile={downloadFile}
+        />
         )}
 
-        {/* ─── 错题本（汇总自测错题 + 上传错题，标注来源与原文依据，支持溯源高亮） ─── */}
         {mode === "mistakes" && (
-          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-stone-700">错题本</h2>
-              <span className="text-xs text-stone-400">共 {mistakes.length} 题</span>
-            </div>
-
-            {!isSignedIn ? (
-              <div className="flex flex-col items-center gap-3 py-8">
-                <p className="text-sm text-stone-500">登录后即可查看你的错题本。</p>
-                <a
-                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
-                  className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                >
-                  登录
-                </a>
-              </div>
-            ) : (
-              <>
-                {/* ── 上传错题区（PDF/图片/拍照 → AI 识别 → 入库） ── */}
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true); }}
-                  onDragLeave={() => setUploadDragOver(false)}
-                  onDrop={(e) => { e.preventDefault(); setUploadDragOver(false); handleMistakeFile(e.dataTransfer.files?.[0]); }}
-                  className={`flex flex-col gap-3 rounded-xl border bg-stone-50 p-4 transition-colors ${
-                    uploadDragOver ? "border-teal-500 ring-2 ring-teal-500/30" : "border-stone-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-stone-700">📎 上传错题（试卷/作业/笔记截图）</span>
-                    <input
-                      ref={mistakeFileRef}
-                      type="file"
-                      accept=".pdf,image/*,capture=camera"
-                      className="hidden"
-                      onChange={(e) => handleMistakeFile(e.target.files?.[0])}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => mistakeFileRef.current?.click()}
-                      disabled={uploadExtracting || uploadingMistakes}
-                      className="shrink-0 rounded-full border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-50"
-                    >
-                      {uploadExtracting ? "解析中…" : "选择文件"}
-                    </button>
-                  </div>
-
-                  {uploadMistakeText ? (
-                    <div className="flex flex-col gap-2">
-                      <textarea
-                        value={uploadMistakeText}
-                        onChange={(e) => setUploadMistakeText(e.target.value)}
-                        placeholder="识别出的文本（可手动修改）…"
-                        className="w-full h-28 resize-y rounded-lg border border-stone-300 bg-white p-3 text-xs text-stone-800 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30"
-                      />
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs text-stone-400">
-                          {uploadMsg || `${uploadMistakeText.length} 字 · 修改后点击识别`}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => { setUploadMistakeText(""); setUploadMsg(""); }}
-                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-600 hover:border-stone-400"
-                          >
-                            清除
-                          </button>
-                          <button
-                            type="button"
-                            onClick={uploadMistakesToServer}
-                            disabled={uploadingMistakes || !uploadMistakeText.trim()}
-                            className="rounded-full bg-purple-700 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-purple-800 disabled:opacity-50"
-                          >
-                            {uploadingMistakes ? "AI 识别中…" : "🔍 识别错题"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={`flex items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-                      uploadDragOver ? "border-teal-500 bg-teal-50" : "border-stone-300 hover:border-stone-400"
-                    }`}>
-                      {uploadExtracting ? (
-                        <p className="text-sm text-teal-700">{uploadMsg}</p>
-                      ) : (
-                        <p className="text-sm text-stone-500">
-                          拖拽 PDF / 图片到此处，或点击「选择文件」<br/>
-                          <span className="text-xs text-stone-400">支持拍照、试卷截图、作业照片（印刷体效果最佳）</span>
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── 错题列表 ── */}
-                {mistakeLoading && mistakes.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-                ) : mistakes.length === 0 ? (
-                  <div className="py-6 text-center">
-                    <p className="text-sm text-stone-500">错题本还是空的。</p>
-                    <p className="mt-1 text-xs text-stone-400">
-                      去自测题答题（答错可收入），或直接在上方上传试卷/错题图片。
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-4">
-                {/* 来源分组 chips（来自自测题 / 上传错题 分开） */}
-                <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
-                  {([
-                    ["all", "全部"],
-                    ["quiz", "来自自测题"],
-                    ["upload", "上传错题"],
-                  ] as const).map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => setMistakeOrigin(v)}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                        mistakeOrigin === v
-                          ? "bg-white text-teal-700 shadow-sm"
-                          : "text-stone-600 hover:text-stone-900"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {mistakes
-                  .filter((m) => mistakeOrigin === "all" || m.origin === mistakeOrigin)
-                  .map((m) => {
-                    const open = openMistakeId === m.id;
-                    return (
-                      <div
-                        key={m.id}
-                        className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
-                      >
-                        <span
-                          className={`self-start rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            m.origin === "quiz"
-                              ? "bg-teal-50 text-teal-700"
-                              : "bg-purple-50 text-purple-700"
-                          }`}
-                        >
-                          {m.origin === "quiz" ? "来自自测题" : "上传错题"}
-                        </span>
-                        <p className="text-sm font-medium leading-relaxed text-stone-900">
-                          {m.question}
-                        </p>
-                        <div className="flex flex-col gap-1">
-                          {m.options.map((opt, oi) => {
-                            const isCorrect = oi === m.answer;
-                            const isPicked = m.picked === oi;
-                            let cls = "rounded-lg border px-3 py-1.5 text-xs ";
-                            if (isCorrect)
-                              cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
-                            else if (isPicked)
-                              cls += "border-red-300 bg-red-50 text-red-700";
-                            else cls += "border-stone-200 bg-white text-stone-400";
-                            return (
-                              <div key={oi} className={cls}>
-                                {opt}
-                                {isCorrect ? " ✓" : isPicked ? " （你的答案）" : ""}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {m.explanation && (
-                          <p className="text-xs leading-relaxed text-stone-500">
-                            {m.explanation}
-                          </p>
-                        )}
-                        {/* 溯源：依据 + 出处 */}
-                        {m.evidence && (
-                          <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
-                            <span className="font-medium text-stone-500">📌 原文依据：</span>
-                            「{m.evidence}」
-                          </div>
-                        )}
-                        {m.source_title && (
-                          <p className="text-xs text-stone-400">出处：{m.source_title}</p>
-                        )}
-                        {/* 溯源高亮：展开原文，依据句高亮 */}
-                        {m.source_text && (
-                          <button
-                            type="button"
-                            onClick={() => setOpenMistakeId(open ? null : m.id)}
-                            className="self-start text-xs text-teal-700 underline hover:text-teal-800"
-                          >
-                            {open ? "收起原文" : "📄 查看原文（依据高亮）"}
-                          </button>
-                        )}
-                        {open && m.source_text && (
-                          <div className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-stone-100 bg-stone-50 p-3 text-xs leading-7 text-stone-700">
-                            {highlightSource(m.source_text, m.evidence)}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-            </>
-            )
-          }
-          </section>
+        <MistakesView
+          isSignedIn={isSignedIn}
+          mistakes={mistakes}
+          mistakeOrigin={mistakeOrigin}
+          setMistakeOrigin={setMistakeOrigin}
+          mistakeLoading={mistakeLoading}
+          openMistakeId={openMistakeId}
+          setOpenMistakeId={setOpenMistakeId}
+          uploadDragOver={uploadDragOver}
+          setUploadDragOver={setUploadDragOver}
+          mistakeFileRef={mistakeFileRef}
+          handleMistakeFile={handleMistakeFile}
+          uploadExtracting={uploadExtracting}
+          uploadMistakeText={uploadMistakeText}
+          setUploadMistakeText={setUploadMistakeText}
+          uploadMsg={uploadMsg}
+          setUploadMsg={setUploadMsg}
+          uploadingMistakes={uploadingMistakes}
+          uploadMistakesToServer={uploadMistakesToServer}
+        />
         )}
 
         {/* ─── 更多学习工具板块（可点击入口） ─── */}
