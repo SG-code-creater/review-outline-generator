@@ -17,14 +17,16 @@ const SYSTEM_PROMPT =
   "根据用户提供的学习资料，生成若干道单项选择题（每题 4 个选项 A/B/C/D）。" +
   "要求：1）题目考查资料中的关键概念、定义、逻辑与易错点，不要出无关或资料外的内容；" +
   "2）只有一个正确选项，其余为合理干扰项；3）每题附一句简短解析说明为什么正确；" +
-  "4）用中文；5）只输出如下 JSON 数组，不要任何额外说明或代码围栏：" +
-  '[{"question":"题干","options":["A","B","C","D"],"answer":0,"explanation":"解析"}]。';
+  "4）每题额外提供 evidence 字段：从用户资料中**原样摘录**一句最能支撑正确答案的原文（用于溯源，务必是资料中真实存在的句子）；" +
+  "5）用中文；6）只输出如下 JSON 数组，不要任何额外说明或代码围栏：" +
+  '[{"question":"题干","options":["A","B","C","D"],"answer":0,"explanation":"解析","evidence":"原文依据引文"}]。';
 
 interface QuizItem {
   question: string;
   options: string[];
   answer: number;
   explanation: string;
+  evidence?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -186,6 +188,7 @@ function normalize(arr: unknown[]): QuizItem[] {
         options,
         answer,
         explanation: String(it.explanation ?? ""),
+        evidence: it.evidence ? String(it.evidence) : undefined,
       };
     })
     .filter((q) => q.question && q.options.length >= 2);

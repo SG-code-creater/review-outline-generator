@@ -88,7 +88,7 @@ const FEATURES = [
 ];
 
 type Mode = "outline" | "flashcard" | "review" | "quiz";
-type ReviewView = "due" | "collection" | "outlines";
+type ReviewView = "due" | "collection" | "outlines" | "mistakes";
 type CardStatus = "all" | "new" | "weak" | "fuzzy" | "mastered";
 
 interface Card {
@@ -219,6 +219,24 @@ export default function Home() {
   const [outlineTitleInput, setOutlineTitleInput] = useState("");
   const [outlineTagInput, setOutlineTagInput] = useState("");
 
+  // 错题集（quiz 来源 + 将来 upload 来源，按 origin 分组）
+  interface Mistake {
+    id: string;
+    origin: "quiz" | "upload";
+    question: string;
+    options: string[];
+    answer: number;
+    picked: number | null;
+    explanation: string | null;
+    evidence: string | null;
+    source_text: string;
+    source_title: string | null;
+    created_at: string;
+  }
+  const [mistakes, setMistakes] = useState<Mistake[]>([]);
+  const [mistakeOrigin, setMistakeOrigin] = useState<"all" | "quiz" | "upload">("all");
+  const [mistakeLoading, setMistakeLoading] = useState(false);
+
   // 评分防重复点击（乐观更新用）
   const gradingRef = useRef(false);
 
@@ -231,11 +249,15 @@ export default function Home() {
     options: string[];
     answer: number;
     explanation: string;
+    evidence?: string;
   }
   const [quiz, setQuiz] = useState<QuizItem[]>([]);
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizPicked, setQuizPicked] = useState<number[]>([]); // 每题选中的选项下标，-1 未答
   const [quizRevealed, setQuizRevealed] = useState<boolean[]>([]); // 每题是否已揭示答案
+  const [savedQuizIdx, setSavedQuizIdx] = useState<Set<number>>(new Set()); // 已收入错题集的题下标
+  const [saveMistakeState, setSaveMistakeState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMistakeIdx, setSaveMistakeIdx] = useState<number | null>(null);
 
   async function handleGenerate() {
     setError("");
@@ -280,6 +302,7 @@ export default function Home() {
     setQuiz([]);
     setQuizPicked([]);
     setQuizRevealed([]);
+    setSavedQuizIdx(new Set());
     try {
       const res = await fetch("/api/quiz", {
         method: "POST",
@@ -318,6 +341,39 @@ export default function Home() {
       if (quizPicked[i] === q.answer) correct++;
     });
     return { correct, total };
+  }
+
+  // 把答错的题收入错题集（溯源：带上源文本与依据引文）
+  async function saveMistake(qi: number) {
+    const q = quiz[qi];
+    if (!q) return;
+    setSaveMistakeState("saving");
+    setSaveMistakeIdx(qi);
+    try {
+      const res = await fetch("/api/mistakes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q.question,
+          options: q.options,
+          answer: q.answer,
+          picked: quizPicked[qi] ?? null,
+          explanation: q.explanation,
+          evidence: q.evidence || null,
+          source_text: text,
+          source_title: scenario && scenario !== "通用" ? scenario : text.slice(0, 40),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "保存失败");
+      setSavedQuizIdx((prev) => new Set(prev).add(qi));
+      setSaveMistakeState("saved");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+      setSaveMistakeState("error");
+    } finally {
+      setSaveMistakeIdx(null);
+    }
   }
 
   function toggleFlip(i: number) {
@@ -468,6 +524,21 @@ export default function Home() {
     }
   }
 
+  async function loadMistakes() {
+    setMistakeLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/mistakes", { method: "GET" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "加载失败");
+      setMistakes(data.mistakes || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setMistakeLoading(false);
+    }
+  }
+
   // 题集内更新单卡标签
   async function updateCardTags(id: string, tags: string[]) {
     try {
@@ -552,6 +623,7 @@ export default function Home() {
       if (reviewView === "due") loadDueCards();
       else if (reviewView === "collection") loadCollection();
       else if (reviewView === "outlines") loadOutlines();
+      else if (reviewView === "mistakes") loadMistakes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isSignedIn, reviewView]);
@@ -1066,15 +1138,48 @@ export default function Home() {
                           })}
                         </div>
                         {revealed && (
-                          <div
-                            className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                              picked === q.answer
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-amber-50 text-amber-700"
-                            }`}
-                          >
-                            {picked === q.answer ? "✅ 答对了！" : "❌ 答错了。"}{" "}
-                            {q.explanation}
+                          <div className="flex flex-col gap-2">
+                            <div
+                              className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                                picked === q.answer
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {picked === q.answer ? "✅ 答对了！" : "❌ 答错了。"}{" "}
+                              {q.explanation}
+                            </div>
+                            {/* 溯源：依据引文 */}
+                            {q.evidence ? (
+                              <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
+                                <span className="font-medium text-stone-500">📌 原文依据：</span>
+                                「{q.evidence}」
+                              </div>
+                            ) : null}
+                            {/* 答错 → 收入错题集 */}
+                            {picked !== q.answer &&
+                              (savedQuizIdx.has(gi) ? (
+                                <span className="text-xs font-medium text-emerald-600">
+                                  ✓ 已收入错题集
+                                </span>
+                              ) : !isSignedIn ? (
+                                <a
+                                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
+                                  className="self-start text-xs text-teal-700 underline hover:text-teal-800"
+                                >
+                                  登录后收入错题集
+                                </a>
+                              ) : (
+                                <button
+                                  onClick={() => saveMistake(gi)}
+                                  disabled={saveMistakeState === "saving" && saveMistakeIdx === gi}
+                                  className="self-start rounded-full bg-stone-800 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-stone-900 disabled:opacity-50"
+                                >
+                                  {saveMistakeState === "saving" && saveMistakeIdx === gi
+                                    ? "收录中…"
+                                    : "收入错题集"}
+                                </button>
+                              ))}
                           </div>
                         )}
                       </div>
@@ -1127,6 +1232,7 @@ export default function Home() {
                     ["due", "今日复习"],
                     ["collection", "卡片题集"],
                     ["outlines", "我的提纲"],
+                    ["mistakes", "错题集"],
                   ] as const).map(([v, label]) => (
                     <button
                       key={v}
@@ -1478,6 +1584,102 @@ export default function Home() {
                           </button>
                         </div>
                       ))}
+                    </div>
+                  ))}
+
+                {/* ── 错题集（quiz 来源 + 上传来源，分组展示） ── */}
+                {reviewView === "mistakes" &&
+                  (mistakeLoading && mistakes.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+                  ) : mistakes.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <p className="text-sm text-stone-500">还没有错题。</p>
+                      <p className="mt-1 text-xs text-stone-400">
+                        去「🧠 自测题」答题，答错的题可点「收入错题集」沉淀到这里。
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-4">
+                      {/* 来源分组 chips（自测 / 上传 分开） */}
+                      <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
+                        {([
+                          ["all", "全部"],
+                          ["quiz", "自测错题"],
+                          ["upload", "上传错题"],
+                        ] as const).map(([v, label]) => (
+                          <button
+                            key={v}
+                            onClick={() => setMistakeOrigin(v)}
+                            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                              mistakeOrigin === v
+                                ? "bg-white text-teal-700 shadow-sm"
+                                : "text-stone-600 hover:text-stone-900"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {mistakes
+                        .filter(
+                          (m) => mistakeOrigin === "all" || m.origin === mistakeOrigin,
+                        )
+                        .map((m) => (
+                          <div
+                            key={m.id}
+                            className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
+                          >
+                            <span
+                              className={`self-start rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                m.origin === "quiz"
+                                  ? "bg-teal-50 text-teal-700"
+                                  : "bg-purple-50 text-purple-700"
+                              }`}
+                            >
+                              {m.origin === "quiz" ? "自测错题" : "上传错题"}
+                            </span>
+                            <p className="text-sm font-medium leading-relaxed text-stone-900">
+                              {m.question}
+                            </p>
+                            <div className="flex flex-col gap-1">
+                              {m.options.map((opt, oi) => {
+                                const isCorrect = oi === m.answer;
+                                const isPicked = m.picked === oi;
+                                let cls =
+                                  "rounded-lg border px-3 py-1.5 text-xs ";
+                                if (isCorrect)
+                                  cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
+                                else if (isPicked)
+                                  cls += "border-red-300 bg-red-50 text-red-700";
+                                else cls += "border-stone-200 bg-white text-stone-400";
+                                return (
+                                  <div key={oi} className={cls}>
+                                    {opt}
+                                    {isCorrect ? " ✓" : isPicked ? " （你的答案）" : ""}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {m.explanation && (
+                              <p className="text-xs leading-relaxed text-stone-500">
+                                {m.explanation}
+                              </p>
+                            )}
+                            {/* 溯源：依据 + 出处 */}
+                            {m.evidence && (
+                              <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
+                                <span className="font-medium text-stone-500">📌 原文依据：</span>
+                                「{m.evidence}」
+                              </div>
+                            )}
+                            {m.source_title && (
+                              <p className="text-xs text-stone-400">
+                                出处：{m.source_title}
+                              </p>
+                            )}
+                          </div>
+                        ))}
                     </div>
                   ))}
               </>
