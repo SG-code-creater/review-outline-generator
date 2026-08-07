@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { SignInButton, useUser, useClerk } from "@clerk/nextjs";
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -92,6 +92,65 @@ interface Card {
   question: string;
   answer: string;
   topic: string;
+}
+
+// ─── 自定义用户菜单（替代 UserButton，规避 EdgeOne 无 middleware 下登出客户端跳转卡死）───
+function UserMenu() {
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const [open, setOpen] = useState(false);
+
+  const handleSignOut = () => {
+    // 正常登出；无论结果如何，1.2s 后强制整页刷新到首页，
+    // 让会话 cookie 被重新读取、UI 状态复位（绕开客户端路由跳转卡死）。
+    signOut({ redirectUrl: "/" }).catch(() => {});
+    setTimeout(() => {
+      window.location.assign("/");
+    }, 1200);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-teal-700 text-sm font-medium text-white shadow-sm ring-2 ring-white transition-colors hover:bg-teal-800"
+        aria-label="用户菜单"
+      >
+        {user?.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.imageUrl}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span>
+            {(user?.firstName?.[0] ?? user?.username?.[0] ?? "我").toUpperCase()}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
+          <a
+            href="https://accounts.xuebox.me/user"
+            target="_blank"
+            rel="noreferrer"
+            className="block px-4 py-2 text-sm text-stone-700 transition-colors hover:bg-stone-50"
+          >
+            管理账户
+          </a>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="block w-full px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50"
+          >
+            退出登录
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Home() {
@@ -197,7 +256,7 @@ export default function Home() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {isSignedIn ? (
-              <UserButton />
+              <UserMenu />
             ) : (
               <SignInButton mode="modal">
                 <button className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800">
