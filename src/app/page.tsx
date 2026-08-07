@@ -359,23 +359,21 @@ export default function Home() {
               <span className="text-xs text-stone-400">点击卡片翻转查看答案</span>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {cards.map((card, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => toggleFlip(i)}
-                  className="group relative flex h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-stone-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-teal-300 hover:shadow-md"
-                  style={{ perspective: "800px" }}
-                >
-                  {/* 翻转动画容器 */}
-                  <div
-                    className={`absolute inset-0 flex flex-col transition-transform duration-400 ${
-                      flipped.has(i) ? "[transform:rotateY(180deg)]" : ""
+              {cards.map((card, i) => {
+                const isFlipped = flipped.has(i);
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => toggleFlip(i)}
+                    className={`group relative flex h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-stone-200 p-5 text-left shadow-sm transition-all duration-300 hover:border-teal-300 hover:shadow-md ${
+                      isFlipped
+                        ? "bg-gradient-to-br from-teal-50 to-emerald-50"
+                        : "bg-white"
                     }`}
-                    style={{ transformStyle: "preserve-3d", backfaceVisibility: "hidden" }}
                   >
                     {/* 正面：问题 */}
-                    <div className="flex h-full flex-col justify-between">
+                    <div className={`flex h-full flex-col justify-between ${isFlipped ? "hidden" : ""}`}>
                       <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
                         {card.topic}
                       </span>
@@ -384,28 +382,19 @@ export default function Home() {
                       </p>
                       <p className="text-xs text-stone-400">点击查看答案 ↓</p>
                     </div>
-                  </div>
-                  {/* 背面：答案（用绝对定位覆盖正面） */}
-                  <div
-                    className={`absolute inset-0 flex flex-col justify-center rounded-xl bg-gradient-to-br from-teal-50 to-emerald-50 p-5 ${
-                      flipped.has(i) ? "" : "invisible"
-                    }`}
-                    style={{
-                      transform: "rotateY(180deg)",
-                      transformStyle: "preserve-3d",
-                      backfaceVisibility: "hidden",
-                    }}
-                  >
-                    <span className="mb-2 inline-block self-start rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-800">
-                      {card.topic} · 答案
-                    </span>
-                    <p className="text-base leading-relaxed text-stone-800">
-                      {card.answer}
-                    </p>
-                    <p className="mt-3 text-xs text-stone-400">点击返回问题 ↑</p>
-                  </div>
-                </button>
-              ))}
+                    {/* 背面：答案 */}
+                    <div className={`flex h-full flex-col justify-center ${!isFlipped ? "hidden" : ""}`}>
+                      <span className="mb-2 inline-block self-start rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-800">
+                        {card.topic} · 答案
+                      </span>
+                      <p className="text-base leading-relaxed text-stone-800">
+                        {card.answer}
+                      </p>
+                      <p className="mt-3 text-xs text-stone-400">点击返回问题 ↑</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </section>
         )}
