@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { UserButton, useUser, useClerk } from "@clerk/nextjs";
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -101,6 +101,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { isSignedIn } = useUser();
+  const { openSignIn } = useClerk();
 
   // 知识点卡片状态
   const [cards, setCards] = useState<Card[]>([]);
@@ -199,11 +200,12 @@ export default function Home() {
             {isSignedIn ? (
               <UserButton />
             ) : (
-              <SignInButton mode="modal">
-                <button className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800">
-                  登录
-                </button>
-              </SignInButton>
+              <button
+                onClick={() => openSignIn({ fallbackRedirectUrl: "/" })}
+                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800"
+              >
+                登录
+              </button>
             )}
           </div>
         </header>
