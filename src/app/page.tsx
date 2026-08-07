@@ -87,7 +87,7 @@ const FEATURES = [
   },
 ];
 
-type Mode = "outline" | "flashcard" | "review";
+type Mode = "outline" | "flashcard" | "review" | "quiz";
 type ReviewView = "due" | "collection" | "outlines";
 type CardStatus = "all" | "new" | "weak" | "fuzzy" | "mastered";
 
@@ -225,6 +225,18 @@ export default function Home() {
   // 题集内每张卡片的临时标签输入
   const [tagDraft, setTagDraft] = useState<Record<string, string>>({});
 
+  // 自测题（主动回忆）状态
+  interface QuizItem {
+    question: string;
+    options: string[];
+    answer: number;
+    explanation: string;
+  }
+  const [quiz, setQuiz] = useState<QuizItem[]>([]);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizPicked, setQuizPicked] = useState<number[]>([]); // 每题选中的选项下标，-1 未答
+  const [quizRevealed, setQuizRevealed] = useState<boolean[]>([]); // 每题是否已揭示答案
+
   async function handleGenerate() {
     setError("");
     if (!text.trim()) {
@@ -255,6 +267,57 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // 生成自测题（主动回忆）：调用 /api/quiz
+  async function generateQuiz() {
+    setError("");
+    if (!text.trim()) {
+      setError("请先粘贴或输入课件 / 笔记文本，再生成自测题。");
+      return;
+    }
+    setQuizLoading(true);
+    setQuiz([]);
+    setQuizPicked([]);
+    setQuizRevealed([]);
+    try {
+      const res = await fetch("/api/quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, scenario, count: 5 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "生成自测题失败，请稍后重试。");
+      setQuiz(data.quiz || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成自测题失败，请稍后重试。");
+    } finally {
+      setQuizLoading(false);
+    }
+  }
+
+  // 自测题：选择某选项（仅在未揭示时生效）
+  function pickQuizOption(qi: number, oi: number) {
+    if (quizRevealed[qi]) return;
+    setQuizPicked((prev) => {
+      const next = [...prev];
+      next[qi] = oi;
+      return next;
+    });
+    setQuizRevealed((prev) => {
+      const next = [...prev];
+      next[qi] = true;
+      return next;
+    });
+  }
+
+  function quizScore(): { correct: number; total: number } {
+    const total = quiz.length;
+    let correct = 0;
+    quiz.forEach((q, i) => {
+      if (quizPicked[i] === q.answer) correct++;
+    });
+    return { correct, total };
   }
 
   function toggleFlip(i: number) {
@@ -688,6 +751,16 @@ export default function Home() {
           >
             📚 我的复习
           </button>
+          <button
+            onClick={() => switchMode("quiz")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "quiz"
+                ? "bg-white text-teal-700 shadow-sm"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            🧠 自测题
+          </button>
         </div>
 
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
@@ -755,7 +828,9 @@ export default function Home() {
             placeholder={
               mode === "outline"
                 ? "把课件或笔记内容粘贴到这里，或上传 PDF / 图片自动提取……"
-                : "粘贴要拆解成卡片的笔记内容，或上传 PDF / 图片自动提取……"
+                : mode === "quiz"
+                  ? "粘贴要出成自测题的资料，或上传 PDF / 图片自动提取……"
+                  : "粘贴要拆解成卡片的笔记内容，或上传 PDF / 图片自动提取……"
             }
             className="h-48 w-full resize-y rounded-xl border border-stone-300 bg-white p-3 text-sm text-stone-900 shadow-sm outline-none transition-colors placeholder:text-stone-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
           />
@@ -764,15 +839,19 @@ export default function Home() {
               {extractMsg || (dragOver ? "松开即可提取文字" : "支持拖拽文件到此处")}
             </span>
             <button
-              onClick={handleGenerate}
-              disabled={loading || extracting}
+              onClick={mode === "quiz" ? generateQuiz : handleGenerate}
+              disabled={loading || quizLoading || extracting}
               className="self-start rounded-full bg-teal-700 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-teal-800 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading
-                ? "生成中…"
-                : mode === "outline"
-                  ? "生成提纲"
-                  : "生成卡片"}
+              {mode === "quiz"
+                ? quizLoading
+                  ? "出题中…"
+                  : "生成自测题"
+                : loading
+                  ? "生成中…"
+                  : mode === "outline"
+                    ? "生成提纲"
+                    : "生成卡片"}
             </button>
           </div>
         </section>
@@ -918,6 +997,108 @@ export default function Home() {
                 );
               })}
             </div>
+          </section>
+        )}
+
+        {/* ─── 自测题（主动回忆） ─── */}
+        {mode === "quiz" && (
+          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-stone-700">
+                {quiz.length > 0 ? `自测题（${quiz.length} 道）` : "自测题"}
+              </h2>
+              {quiz.length > 0 && (
+                <button
+                  onClick={generateQuiz}
+                  disabled={quizLoading}
+                  className="text-xs text-stone-500 underline hover:text-teal-700 disabled:opacity-50"
+                >
+                  重新出题
+                </button>
+              )}
+            </div>
+
+            {quiz.length === 0 ? (
+              <p className="py-6 text-center text-sm text-stone-400">
+                在上方粘贴或上传资料，点击「生成自测题」即可开始主动回忆。
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-col gap-5">
+                  {quiz.map((q, gi) => {
+                    const picked = quizPicked[gi] ?? -1;
+                    const revealed = quizRevealed[gi] ?? false;
+                    return (
+                      <div
+                        key={gi}
+                        className="flex flex-col gap-3 rounded-xl border border-stone-100 bg-stone-50 p-4"
+                      >
+                        <p className="text-sm font-medium leading-relaxed text-stone-900">
+                          {gi + 1}. {q.question}
+                        </p>
+                        <div className="flex flex-col gap-2">
+                          {q.options.map((opt, oi) => {
+                            const isCorrect = oi === q.answer;
+                            const isPicked = picked === oi;
+                            let cls =
+                              "rounded-lg border px-3 py-2 text-sm transition-colors ";
+                            if (!revealed) {
+                              cls +=
+                                "border-stone-200 bg-white text-stone-800 hover:border-teal-400 hover:bg-teal-50 cursor-pointer";
+                            } else if (isCorrect) {
+                              cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
+                            } else if (isPicked) {
+                              cls += "border-red-300 bg-red-50 text-red-700";
+                            } else {
+                              cls += "border-stone-200 bg-white text-stone-400";
+                            }
+                            return (
+                              <button
+                                key={oi}
+                                type="button"
+                                disabled={revealed}
+                                onClick={() => pickQuizOption(gi, oi)}
+                                className={cls}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {revealed && (
+                          <div
+                            className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                              picked === q.answer
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {picked === q.answer ? "✅ 答对了！" : "❌ 答错了。"}{" "}
+                            {q.explanation}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 计分条 */}
+                <div className="flex items-center justify-between border-t border-stone-100 pt-3">
+                  <span className="text-sm font-medium text-stone-700">
+                    得分：{quizScore().correct} / {quizScore().total}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setQuizPicked([]);
+                      setQuizRevealed([]);
+                    }}
+                    className="rounded-full border border-stone-300 px-3 py-1 text-xs font-medium text-stone-600 hover:border-teal-500 hover:text-teal-700"
+                  >
+                    重新答题
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         )}
 
