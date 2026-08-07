@@ -54,16 +54,19 @@ const ICONS: Record<string, React.ReactNode> = {
 };
 
 // ─── 板块数据（知识点卡片已上线，其余仍占位） ──────────
+// live=true 表示功能已可点击进入；mode 绑定点击后切换到的顶部模式
 const FEATURES = [
   {
     title: "错题本整理",
     desc: "汇总自测答错的题与上传的错题，标注来源与原文依据，支持溯源高亮。",
     live: true,
+    mode: "mistakes" as Mode,
   },
   {
     title: "知识点卡片",
     desc: "把长篇笔记拆成可记忆的小卡片，支持间隔重复复习。",
     live: true,
+    mode: "review" as Mode,
   },
   {
     title: "PDF 智能问答",
@@ -237,6 +240,32 @@ export default function Home() {
   const [mistakeOrigin, setMistakeOrigin] = useState<"all" | "quiz" | "upload">("all");
   const [mistakeLoading, setMistakeLoading] = useState(false);
   const [openMistakeId, setOpenMistakeId] = useState<string | null>(null); // 展开查看原文（高亮依据）
+
+  // 上传错题状态（PDF/图片 → 文本提取 → AI 识别题目 → 入库）
+  const mistakeFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingMistakes, setUploadingMistakes] = useState(false);
+  const [uploadMistakeText, setUploadMistakeText] = useState(""); // 提取后的文本（可编辑）
+  const [uploadExtracting, setUploadExtracting] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [uploadDragOver, setUploadDragOver] = useState(false);
+
+  // 「即将上线」toast 提示
+  const [toastMsg, setToastMsg] = useState("");
+  useEffect(() => {
+    if (!toastMsg) return;
+    const t = setTimeout(() => setToastMsg(""), 2500);
+    return () => clearTimeout(t);
+  }, [toastMsg]);
+
+  // 功能卡片点击：已上线 → 切换模式；未上线 → 提示
+  function handleFeatureClick(f: (typeof FEATURES)[number]) {
+    if (f.live && f.mode) {
+      switchMode(f.mode);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      setToastMsg(`「${f.title}」即将上线，敬请期待 ✨`);
+    }
+  }
 
   // 评分防重复点击（乐观更新用）
   const gradingRef = useRef(false);
@@ -540,6 +569,69 @@ export default function Home() {
     }
   }
 
+  // ─── 上传错题：文件 → 文本提取 → AI 识别 → 入库 ───
+  async function handleMistakeFile(file?: File | null) {
+    if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImage = file.type.startsWith("image/");
+    if (!isPdf && !isImage) {
+      setError("仅支持 PDF 或图片（png/jpg/webp）。");
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setError("文件过大（>25MB），请先压缩后再上传。");
+      return;
+    }
+    setUploadExtracting(true);
+    setError("");
+    setUploadMsg(isPdf ? "正在解析 PDF…" : "正在识别图片文字…");
+    try {
+      const extracted = isPdf ? await extractPdfText(file) : await ocrImage(file);
+      const trimmed = extracted.replace(/\s+/g, " ").trim();
+      if (!trimmed) {
+        setError("没能提取到文字，请确认文件内容清晰或换一份再试。");
+      } else {
+        setUploadMistakeText(trimmed);
+        setUploadMsg(`已提取 ${trimmed.length} 字，点击「识别错题」开始整理。`);
+      }
+    } catch (e) {
+      setError("解析失败：" + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setUploadExtracting(false);
+      setTimeout(() => setUploadMsg(""), 5000);
+      if (mistakeFileRef.current) mistakeFileRef.current.value = "";
+    }
+  }
+
+  // 调用 /api/mistakes/upload：AI 从文本中识别题目并批量入库
+  async function uploadMistakesToServer() {
+    if (!uploadMistakeText.trim()) {
+      setError("请先上传文件提取文本。");
+      return;
+    }
+    setUploadingMistakes(true);
+    setError("");
+    try {
+      const res = await fetch("/api/mistakes/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: uploadMistakeText, scenario }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "上传失败");
+
+      // 成功：刷新错题列表 + 清空输入
+      setUploadMsg(`✅ 已识别并收录 ${data.count} 道错题！`);
+      setUploadMistakeText("");
+      loadMistakes(); // 刷新列表
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setUploadingMistakes(false);
+      setTimeout(() => setUploadMsg(""), 4000);
+    }
+  }
+
   // 题集内更新单卡标签
   async function updateCardTags(id: string, tags: string[]) {
     try {
@@ -814,58 +906,25 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ─── 模式切换 Tab ─── */}
-        <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
-          <button
-            onClick={() => switchMode("outline")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              mode === "outline"
-                ? "bg-white text-teal-700 shadow-sm"
-                : "text-stone-600 hover:text-stone-900"
-            }`}
-          >
-            📝 提纲生成
-          </button>
-          <button
-            onClick={() => switchMode("flashcard")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              mode === "flashcard"
-                ? "bg-white text-teal-700 shadow-sm"
-                : "text-stone-600 hover:text-stone-900"
-            }`}
-          >
-            🎴 知识点卡片
-          </button>
-          <button
-            onClick={() => switchMode("review")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              mode === "review"
-                ? "bg-white text-teal-700 shadow-sm"
-                : "text-stone-600 hover:text-stone-900"
-            }`}
-          >
-            📚 我的复习
-          </button>
-          <button
-            onClick={() => switchMode("quiz")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              mode === "quiz"
-                ? "bg-white text-teal-700 shadow-sm"
-                : "text-stone-600 hover:text-stone-900"
-            }`}
-          >
-            🧠 自测题
-          </button>
-          <button
-            onClick={() => switchMode("mistakes")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              mode === "mistakes"
-                ? "bg-white text-teal-700 shadow-sm"
-                : "text-stone-600 hover:text-stone-900"
-            }`}
-          >
-            📕 错题本
-          </button>
+        {/* ─── 模式切换 Tab（仅核心输入模式；复习/错题本通过下方卡片进入） ─── */}
+        <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit overflow-x-auto flex-nowrap sm:overflow-x-visible">
+          {([
+            ["outline", "📝 提纲生成"],
+            ["flashcard", "🎴 知识点卡片"],
+            ["quiz", "🧠 自测题"],
+          ] as const).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => switchMode(m)}
+              className={`shrink-0 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                mode === m
+                  ? "bg-white text-teal-700 shadow-sm"
+                  : "text-stone-600 hover:text-stone-900"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
@@ -1643,17 +1702,95 @@ export default function Home() {
                   登录
                 </a>
               </div>
-            ) : mistakeLoading && mistakes.length === 0 ? (
-              <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-            ) : mistakes.length === 0 ? (
-              <div className="py-10 text-center">
-                <p className="text-sm text-stone-500">错题本还是空的。</p>
-                <p className="mt-1 text-xs text-stone-400">
-                  去「🧠 自测题」答题，答错的题点「收入错题本」即可沉淀到这里。
-                </p>
-              </div>
             ) : (
-              <div className="flex flex-col gap-4">
+              <>
+                {/* ── 上传错题区（PDF/图片/拍照 → AI 识别 → 入库） ── */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true); }}
+                  onDragLeave={() => setUploadDragOver(false)}
+                  onDrop={(e) => { e.preventDefault(); setUploadDragOver(false); handleMistakeFile(e.dataTransfer.files?.[0]); }}
+                  className={`flex flex-col gap-3 rounded-xl border bg-stone-50 p-4 transition-colors ${
+                    uploadDragOver ? "border-teal-500 ring-2 ring-teal-500/30" : "border-stone-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-stone-700">📎 上传错题（试卷/作业/笔记截图）</span>
+                    <input
+                      ref={mistakeFileRef}
+                      type="file"
+                      accept=".pdf,image/*,capture=camera"
+                      className="hidden"
+                      onChange={(e) => handleMistakeFile(e.target.files?.[0])}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => mistakeFileRef.current?.click()}
+                      disabled={uploadExtracting || uploadingMistakes}
+                      className="shrink-0 rounded-full border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-50"
+                    >
+                      {uploadExtracting ? "解析中…" : "选择文件"}
+                    </button>
+                  </div>
+
+                  {uploadMistakeText ? (
+                    <div className="flex flex-col gap-2">
+                      <textarea
+                        value={uploadMistakeText}
+                        onChange={(e) => setUploadMistakeText(e.target.value)}
+                        placeholder="识别出的文本（可手动修改）…"
+                        className="w-full h-28 resize-y rounded-lg border border-stone-300 bg-white p-3 text-xs text-stone-800 outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-stone-400">
+                          {uploadMsg || `${uploadMistakeText.length} 字 · 修改后点击识别`}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setUploadMistakeText(""); setUploadMsg(""); }}
+                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-600 hover:border-stone-400"
+                          >
+                            清除
+                          </button>
+                          <button
+                            type="button"
+                            onClick={uploadMistakesToServer}
+                            disabled={uploadingMistakes || !uploadMistakeText.trim()}
+                            className="rounded-full bg-purple-700 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-purple-800 disabled:opacity-50"
+                          >
+                            {uploadingMistakes ? "AI 识别中…" : "🔍 识别错题"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`flex items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
+                      uploadDragOver ? "border-teal-500 bg-teal-50" : "border-stone-300 hover:border-stone-400"
+                    }`}>
+                      {uploadExtracting ? (
+                        <p className="text-sm text-teal-700">{uploadMsg}</p>
+                      ) : (
+                        <p className="text-sm text-stone-500">
+                          拖拽 PDF / 图片到此处，或点击「选择文件」<br/>
+                          <span className="text-xs text-stone-400">支持拍照、试卷截图、作业照片（印刷体效果最佳）</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 错题列表 ── */}
+                {mistakeLoading && mistakes.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+                ) : mistakes.length === 0 ? (
+                  <div className="py-6 text-center">
+                    <p className="text-sm text-stone-500">错题本还是空的。</p>
+                    <p className="mt-1 text-xs text-stone-400">
+                      去自测题答题（答错可收入），或直接在上方上传试卷/错题图片。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
                 {/* 来源分组 chips（来自自测题 / 上传错题 分开） */}
                 <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
                   {([
@@ -1749,11 +1886,14 @@ export default function Home() {
                   })}
               </div>
             )}
+            </>
+            )
+          }
           </section>
         )}
 
-        {/* ─── 更多学习工具板块 ─── */}
-        <section className="flex flex-col gap-4">
+        {/* ─── 更多学习工具板块（可点击入口） ─── */}
+        <section className="flex flex-col gap-3 sm:gap-4">
           <div>
             <h2 className="text-lg font-semibold text-stone-900">更多学习工具</h2>
             <p className="mt-1 text-sm text-stone-500">
@@ -1761,47 +1901,71 @@ export default function Home() {
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f) => (
-              <div
-                key={f.title}
-                className="group flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-50 text-teal-600">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.8}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="h-5 w-5"
-                    >
-                      {ICONS[f.title]}
-                    </svg>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                      f.live
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-teal-50 text-teal-700"
+            {FEATURES.map((f) => {
+              const isActive = f.live && !!f.mode && mode === f.mode;
+              return (
+                <button
+                  key={f.title}
+                  type="button"
+                  onClick={() => handleFeatureClick(f)}
+                  className={`group flex flex-col gap-2.5 sm:gap-3 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all duration-200 cursor-pointer sm:p-5
+                    ${
+                      isActive
+                        ? "border-teal-400 ring-2 ring-teal-500/20 -translate-y-0.5 shadow-md"
+                        : "border-stone-200 hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md"
                     }`}
-                  >
-                    {f.live ? "已上线" : "即将上线"}
-                  </span>
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-stone-900">
-                    {f.title}
-                  </h3>
-                  <p className="mt-1 text-sm leading-6 text-stone-500">
-                    {f.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${isActive ? "bg-teal-100 text-teal-700" : "bg-teal-50 text-teal-600"}`}>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={1.8}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-5 w-5"
+                      >
+                        {ICONS[f.title]}
+                      </svg>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        f.live
+                          ? isActive
+                            ? "bg-teal-100 text-teal-700"
+                            : "bg-emerald-100 text-emerald-700"
+                          : "bg-teal-50 text-teal-700"
+                      }`}
+                    >
+                      {f.live ? (isActive ? "当前" : "已上线") : "即将上线"}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-stone-900">
+                      {f.title}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-stone-500">
+                      {f.desc}
+                    </p>
+                  </div>
+                  {f.live && (
+                    <span className="text-xs font-medium text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                      点击进入 →
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </section>
+
+        {/* ─── Toast 提示 ─── */}
+        {toastMsg && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-full bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg">
+            {toastMsg}
+          </div>
+        )}
 
         <footer className="pt-2 text-center text-xs text-stone-400">
           学盒 xuebox · 测试版 · 让学习更轻松
