@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@clerk/nextjs/server";
 import { getServerSupabase } from "@/lib/supabase";
+import { scenarioGuidance } from "@/lib/scenarios";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
@@ -32,9 +33,11 @@ export async function POST(req: NextRequest) {
   }
 
   let text = "";
+  let scenario: string | undefined;
   try {
     const body = await req.json();
     text = typeof body?.text === "string" ? body.text : "";
+    scenario = typeof body?.scenario === "string" ? body.scenario : undefined;
   } catch {
     return NextResponse.json({ error: "请求格式错误。" }, { status: 400 });
   }
@@ -83,7 +86,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         model: "deepseek-chat",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: SYSTEM_PROMPT + scenarioGuidance(scenario) },
           { role: "user", content: text },
         ],
         temperature: 0.3,

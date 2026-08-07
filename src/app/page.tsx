@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { SCENARIOS, type Scenario } from "@/lib/scenarios";
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -159,6 +160,7 @@ function UserMenu() {
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("outline");
+  const [scenario, setScenario] = useState<Scenario>("通用");
   const [text, setText] = useState("");
   const [outline, setOutline] = useState("");
   const [loading, setLoading] = useState(false);
@@ -184,7 +186,7 @@ export default function Home() {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, scenario }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "生成失败，请稍后重试。");
@@ -208,6 +210,41 @@ export default function Home() {
       else next.add(i);
       return next;
     });
+  }
+
+  // 下载文本文件（导出 .md / Anki .txt）
+  function downloadFile(filename: string, content: string, mime: string) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportOutlineMd() {
+    downloadFile("复习提纲.md", outline, "text/markdown");
+  }
+
+  // 导出为 Anki 可导入格式（问题\t答案\t标签，制表符分隔）
+  function exportAnki() {
+    const lines = cards.map((c) => `${c.question}\t${c.answer}\t${c.topic}`);
+    downloadFile("学盒闪卡_Anki导入.txt", lines.join("\n"), "text/plain");
+  }
+
+  async function copyAllCards() {
+    const text = cards
+      .map((c, i) => `【${i + 1}】${c.topic}\nQ: ${c.question}\nA: ${c.answer}`)
+      .join("\n\n");
+    try {
+      await navigator.clipboard?.writeText(text);
+      setError("");
+    } catch {
+      setError("复制失败，请手动选择。");
+    }
   }
 
   // 切换模式时清空结果
@@ -296,6 +333,25 @@ export default function Home() {
           </button>
         </div>
 
+        {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-stone-400">备考场景：</span>
+          {SCENARIOS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScenario(s)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                scenario === s
+                  ? "bg-teal-700 text-white shadow-sm"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
         {/* ─── 核心功能区（共用输入框） ─── */}
         <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
           <label htmlFor="source" className="text-sm font-medium text-stone-700">
@@ -336,12 +392,20 @@ export default function Home() {
           <section className="flex flex-col gap-2 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-medium text-stone-700">生成的提纲</h2>
-              <button
-                onClick={() => navigator.clipboard?.writeText(outline)}
-                className="text-xs text-stone-500 underline hover:text-teal-700"
-              >
-                复制
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigator.clipboard?.writeText(outline)}
+                  className="text-xs text-stone-500 underline hover:text-teal-700"
+                >
+                  复制
+                </button>
+                <button
+                  onClick={exportOutlineMd}
+                  className="text-xs text-stone-500 underline hover:text-teal-700"
+                >
+                  下载 .md
+                </button>
+              </div>
             </div>
             <pre className="whitespace-pre-wrap break-words rounded-xl border border-stone-100 bg-stone-50 p-4 text-sm leading-7 text-stone-800">
               {outline}
@@ -356,7 +420,21 @@ export default function Home() {
               <h2 className="text-sm font-medium text-stone-700">
                 生成的知识卡片（{cards.length} 张）
               </h2>
-              <span className="text-xs text-stone-400">点击卡片翻转查看答案</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={copyAllCards}
+                  className="text-xs text-stone-500 underline hover:text-teal-700"
+                >
+                  复制全部
+                </button>
+                <button
+                  onClick={exportAnki}
+                  className="text-xs text-stone-500 underline hover:text-teal-700"
+                >
+                  导出 Anki
+                </button>
+                <span className="text-xs text-stone-400">点击卡片翻转查看答案</span>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {cards.map((card, i) => {
