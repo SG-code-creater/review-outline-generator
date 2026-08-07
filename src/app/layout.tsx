@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "学盒 · 复习提纲生成器",
-  description: "粘贴课件 / 笔记文本，一键生成结构化复习提纲。学盒 —— 你的全能学习助手。",
+  title: "xuebox · 智能学习工具箱",
+  description: "xuebox 学盒 —— 智能学习工具箱：复习提纲、知识点卡片、自测题、错题本，一站式让学习更轻松。",
 };
 
 export default function RootLayout({

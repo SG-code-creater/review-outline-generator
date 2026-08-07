@@ -916,6 +916,9 @@ export default function Home() {
           </div>
         </header>
 
+        {/* ─── 可自定义仪表盘（置顶，含问候/座右铭/天气/任务/番茄钟/趋势/打卡等） ─── */}
+        <Dashboard />
+
         {/* ─── 核心功能区（共用输入框，仅提纲/卡片/自测题模式） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
         <section
@@ -1195,9 +1198,6 @@ export default function Home() {
           uploadMistakesToServer={uploadMistakesToServer}
         />
         )}
-
-        {/* ─── 可自定义仪表盘（置顶，含问候/座右铭/天气/任务/番茄钟/趋势/打卡） ─── */}
-        <Dashboard />
 
         {/* ─── 学习工具板块 ─── */}
         <section className="flex flex-col gap-4">

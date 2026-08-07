@@ -14,21 +14,30 @@ type WidgetKey =
   | "tasks"     // 今日任务
   | "pomodoro"  // 番茄钟
   | "trend"     // 学习趋势曲线
-  | "streak";   // 连续打卡
+  | "streak"    // 连续打卡
+  | "clock"     // 日期时钟
+  | "countdown" // 目标倒计时
+  | "calendar"  // 迷你日历
+  | "stats";    // 学习概览
 
 const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc: string }> = {
-  welcome:  { label: "问候与座右铭", icon: "💡", desc: "时段问候 + 可编辑座右铭 + 每日语录" },
-  weather:  { label: "天气", icon: "🌤️", desc: "当前城市天气（无需密钥）" },
-  tasks:    { label: "今日任务", icon: "✅", desc: "随手记今日待办，本地保存" },
-  pomodoro: { label: "番茄钟", icon: "⏳", desc: "25/5 专注计时，提升专注" },
-  trend:    { label: "学习趋势", icon: "📈", desc: "每日学习量与记忆保持率" },
-  streak:   { label: "连续打卡", icon: "🔥", desc: "展示连续学习天数" },
+  welcome:   { label: "问候与座右铭", icon: "💡", desc: "时段问候 + 可编辑座右铭 + 每日语录" },
+  weather:   { label: "天气", icon: "🌤️", desc: "当前城市天气（无需密钥）" },
+  tasks:     { label: "今日任务", icon: "✅", desc: "随手记今日待办，本地保存" },
+  pomodoro:  { label: "番茄钟", icon: "⏳", desc: "25/5 专注计时，提升专注" },
+  trend:     { label: "学习趋势", icon: "📈", desc: "每日学习量与记忆保持率" },
+  streak:    { label: "连续打卡", icon: "🔥", desc: "展示连续学习天数" },
+  clock:     { label: "日期时钟", icon: "🕐", desc: "实时日期 / 星期 / 时间" },
+  countdown: { label: "目标倒计时", icon: "🎯", desc: "设置考试/目标，看剩余天数" },
+  calendar:  { label: "迷你日历", icon: "📅", desc: "本月日历，标记今天" },
+  stats:     { label: "学习概览", icon: "📊", desc: "今日任务 / 打卡 等速览" },
 };
 
+// 默认开启的 widget（其余在「自定义」里手动加）
 const DEFAULT_ORDER: WidgetKey[] = ["welcome", "weather", "tasks", "pomodoro", "trend", "streak"];
 
-// 占整行（跨 2 列）的 widget
-const WIDE: Set<WidgetKey> = new Set(["trend", "tasks"]);
+// 独占整行的 widget（内容需要横向空间）；其余统一单列等高，消除"不规则"碎片感
+const WIDE: Set<WidgetKey> = new Set(["trend"]);
 
 const QUOTES = [
   "每一步都在靠近更好的自己。",
@@ -99,10 +108,10 @@ function TrendChart({ words, retention }: { words: number[]; retention: number[]
   );
 }
 
-/* ─── 单个 Widget 外壳 ─── */
-function WidgetShell({ title, icon, children, wide }: { title: string; icon: string; children: React.ReactNode; wide?: boolean }) {
+/* ─── 单个 Widget 外壳（h-full + justify-between，让每行卡片等高对齐，消除碎片感） ─── */
+function WidgetShell({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
-    <div className={`glass-card flex flex-col gap-3 p-4 sm:p-5 ${wide ? "sm:col-span-2" : ""}`}>
+    <div className="glass-card flex h-full flex-col gap-3 p-4 sm:p-5">
       <div className="flex items-center gap-2">
         <span className="text-base">{icon}</span>
         <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{title}</h3>
@@ -233,7 +242,7 @@ function TasksWidget() {
   };
 
   return (
-    <WidgetShell title="今日任务" icon="✅" wide>
+    <WidgetShell title="今日任务" icon="✅">
       <div className="flex gap-2">
         <input
           value={input}
@@ -295,7 +304,7 @@ function TrendWidget() {
   const words = useMemo(() => makeCurve(1.2, 12, 10, 1.1), []);
   const retention = useMemo(() => makeCurve(3.7, 55, 20, 2.2).map((v) => Math.min(100, Math.round(v))), []);
   return (
-    <WidgetShell title="学习趋势" icon="📈" wide>
+    <WidgetShell title="学习趋势" icon="📈">
       <div className="flex items-center justify-between text-xs" style={{ color: "var(--text-secondary)" }}>
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--accent-teal)" }} /> 每日学习量</span>
         <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--accent-purple)" }} /> 记忆保持率</span>
@@ -332,6 +341,147 @@ function StreakWidget() {
   );
 }
 
+/* ─── 日期时钟（实时） ─── */
+function ClockWidget() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const week = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  return (
+    <WidgetShell title="日期时钟" icon="🕐">
+      <p className="text-3xl font-mono font-semibold" style={{ color: "var(--accent-blue)" }}>{hh}:{mm}<span className="text-lg opacity-70">:{ss}</span></p>
+      <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{now.getMonth() + 1}月{now.getDate()}日 · 星期{week}</p>
+    </WidgetShell>
+  );
+}
+
+/* ─── 目标倒计时 ─── */
+function CountdownWidget() {
+  const [name, setName] = useState("");
+  const [date, setDate] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [dName, setDName] = useState("");
+  const [dDate, setDDate] = useState("");
+
+  useEffect(() => {
+    try {
+      const n = localStorage.getItem("xuebox_goal_name");
+      const d = localStorage.getItem("xuebox_goal_date");
+      if (n) setName(n);
+      if (d) setDate(d);
+    } catch {}
+  }, []);
+
+  const save = () => {
+    setName(dName.trim());
+    setDate(dDate);
+    try {
+      localStorage.setItem("xuebox_goal_name", dName.trim());
+      localStorage.setItem("xuebox_goal_date", dDate);
+    } catch {}
+    setEditing(false);
+  };
+
+  let days: number | null = null;
+  if (date) {
+    const diff = new Date(date + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0);
+    days = Math.round(diff / 864e5);
+  }
+
+  return (
+    <WidgetShell title="目标倒计时" icon="🎯">
+      {editing || !date ? (
+        <div className="flex flex-col gap-2">
+          <input value={dName} onChange={(e) => setDName(e.target.value)} className="glass-input px-3 py-1.5 text-sm" placeholder="目标名称（如：期末考试）" />
+          <input type="date" value={dDate} onChange={(e) => setDDate(e.target.value)} className="glass-input px-3 py-1.5 text-sm" />
+          <button onClick={save} className="btn-primary-glow px-3 py-1.5 text-sm" disabled={!dDate}>保存</button>
+        </div>
+      ) : (
+        <div className="flex items-end justify-between">
+          <div>
+            <p className="text-3xl font-semibold" style={{ color: days !== null && days < 7 ? "var(--accent-coral)" : "var(--accent-amber)" }}>{days}</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>天后 · {name || "目标"}</p>
+          </div>
+          <button onClick={() => { setDName(name); setDDate(date); setEditing(true); }} className="glass-btn px-3 py-1 text-xs">修改</button>
+        </div>
+      )}
+    </WidgetShell>
+  );
+}
+
+/* ─── 迷你日历 ─── */
+function CalendarWidget() {
+  const [view, setView] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const today = new Date();
+  const first = new Date(view.y, view.m, 1).getDay();
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const shift = (dir: number) => setView((v) => { const d = new Date(v.y, v.m + dir, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const isToday = (d: number) => d === today.getDate() && view.m === today.getMonth() && view.y === today.getFullYear();
+
+  return (
+    <WidgetShell title="迷你日历" icon="📅">
+      <div className="flex items-center justify-between">
+        <button onClick={() => shift(-1)} className="glass-btn px-2 py-0.5 text-xs">‹</button>
+        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{view.y} 年 {view.m + 1} 月</span>
+        <button onClick={() => shift(1)} className="glass-btn px-2 py-0.5 text-xs">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+        {["日", "一", "二", "三", "四", "五", "六"].map((d) => <span key={d}>{d}</span>)}
+        {cells.map((d, i) => (
+          <span key={i} className="rounded py-0.5"
+            style={d && isToday(d) ? { background: "var(--accent-teal)", color: "#021a17", fontWeight: 600 } : d ? { color: "var(--text-secondary)" } : {}}>
+            {d || ""}
+          </span>
+        ))}
+      </div>
+    </WidgetShell>
+  );
+}
+
+/* ─── 学习概览（今日任务进度 + 连续打卡） ─── */
+function StatsWidget() {
+  const [taskDone, setTaskDone] = useState(0);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [streak, setStreak] = useState(1);
+  const today = new Date().toISOString().slice(0, 10);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("xuebox_tasks_" + today);
+      if (raw) {
+        const arr = JSON.parse(raw) as { done: boolean }[];
+        setTaskTotal(arr.length);
+        setTaskDone(arr.filter((t) => t.done).length);
+      }
+      setStreak(Number(localStorage.getItem("xuebox_streak") || "1"));
+    } catch {}
+  }, [today]);
+  const pct = taskTotal ? Math.round((taskDone / taskTotal) * 100) : 0;
+  return (
+    <WidgetShell title="学习概览" icon="📊">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl px-3 py-2 text-center" style={{ background: "rgba(45,212,191,0.07)" }}>
+          <p className="text-xl font-semibold" style={{ color: "var(--accent-teal)" }}>{taskDone}/{taskTotal}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>今日任务</p>
+        </div>
+        <div className="rounded-xl px-3 py-2 text-center" style={{ background: "rgba(251,113,133,0.07)" }}>
+          <p className="text-xl font-semibold" style={{ color: "var(--accent-coral)" }}>{streak}天</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>连续打卡</p>
+        </div>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.06)" }}>
+        <div className="h-full rounded-full transition-all" style={{ width: pct + "%", background: "var(--accent-teal)" }} />
+      </div>
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>今日任务完成 {pct}%</p>
+    </WidgetShell>
+  );
+}
+
 const WIDGET_RENDER: Record<WidgetKey, () => React.ReactElement> = {
   welcome: () => <WelcomeWidget />,
   weather: () => <WeatherWidget />,
@@ -339,6 +489,10 @@ const WIDGET_RENDER: Record<WidgetKey, () => React.ReactElement> = {
   pomodoro: () => <PomodoroWidget />,
   trend: () => <TrendWidget />,
   streak: () => <StreakWidget />,
+  clock: () => <ClockWidget />,
+  countdown: () => <CountdownWidget />,
+  calendar: () => <CalendarWidget />,
+  stats: () => <StatsWidget />,
 };
 
 /* ════════════════ 主仪表盘（含自定义面板） ════════════════ */
@@ -414,10 +568,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* auto-rows-fr + h-full：同一行卡片强制等高，消除高低不齐的"碎片感" */}
+      <div className="grid grid-cols-1 gap-4 auto-rows-fr sm:grid-cols-2 lg:grid-cols-3">
         {order.map((k) => {
           const Render = WIDGET_RENDER[k];
-          return <div key={k} className={WIDE.has(k) ? "sm:col-span-2 lg:col-span-2" : ""}>{<Render />}</div>;
+          return <div key={k} className={WIDE.has(k) ? "sm:col-span-2 lg:col-span-3" : "h-full"}>{<Render />}</div>;
         })}
       </div>
     </section>
