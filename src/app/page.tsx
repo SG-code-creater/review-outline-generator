@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUser } from "@clerk/nextjs";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
 
@@ -87,9 +87,10 @@ const FEATURES = [
   },
 ];
 
-type Mode = "outline" | "flashcard";
+type Mode = "outline" | "flashcard" | "review";
 
 interface Card {
+  id?: string;
   question: string;
   answer: string;
   topic: string;
@@ -171,6 +172,17 @@ export default function Home() {
   const [cards, setCards] = useState<Card[]>([]);
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
 
+  // 保存卡片状态
+  type SaveState = "idle" | "saving" | "saved" | "error";
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  // 我的复习（间隔重复）状态
+  const [reviewCards, setReviewCards] = useState<Card[]>([]);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewRevealed, setReviewRevealed] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewMsg, setReviewMsg] = useState(""); // 完成提示
+
   async function handleGenerate() {
     setError("");
     if (!text.trim()) {
@@ -247,6 +259,79 @@ export default function Home() {
     }
   }
 
+  // 保存当前生成的卡片到"我的复习"
+  async function saveCards() {
+    if (cards.length === 0) return;
+    setSaveState("saving");
+    try {
+      const res = await fetch("/api/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cards }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "保存失败");
+      setSaveState("saved");
+    } catch (e) {
+      setSaveState("error");
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
+  }
+
+  // 加载待复习卡片
+  async function loadDueCards() {
+    setReviewLoading(true);
+    setReviewMsg("");
+    try {
+      const res = await fetch("/api/cards?mode=due", { method: "GET" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "加载失败");
+      setReviewCards(data.cards || []);
+      setReviewIndex(0);
+      setReviewRevealed(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  // 复习评分（quality: 1忘记 / 3模糊 / 5记得）
+  async function gradeCard(quality: number) {
+    const card = reviewCards[reviewIndex];
+    if (!card?.id) return;
+    setReviewLoading(true);
+    try {
+      const res = await fetch("/api/cards/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: card.id, quality }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "更新失败");
+      }
+      const next = reviewIndex + 1;
+      if (next >= reviewCards.length) {
+        setReviewMsg("🎉 今天的复习完成啦！");
+      }
+      setReviewIndex(next);
+      setReviewRevealed(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新失败");
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  // 进入"我的复习"且已登录时，自动拉取待复习卡片
+  useEffect(() => {
+    if (mode === "review" && isSignedIn) {
+      loadDueCards();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, isSignedIn]);
+
   // 切换模式时清空结果
   function switchMode(m: Mode) {
     if (m !== mode) {
@@ -254,6 +339,9 @@ export default function Home() {
       setOutline("");
       setCards([]);
       setFlipped(new Set());
+      setReviewRevealed(false);
+      setReviewMsg("");
+      setSaveState("idle");
       setError("");
     }
   }
@@ -331,6 +419,16 @@ export default function Home() {
           >
             🎴 知识点卡片
           </button>
+          <button
+            onClick={() => switchMode("review")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "review"
+                ? "bg-white text-teal-700 shadow-sm"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            📚 我的复习
+          </button>
         </div>
 
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
@@ -352,7 +450,8 @@ export default function Home() {
           ))}
         </div>
 
-        {/* ─── 核心功能区（共用输入框） ─── */}
+        {/* ─── 核心功能区（共用输入框，仅提纲/卡片模式） ─── */}
+        {mode !== "review" && (
         <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
           <label htmlFor="source" className="text-sm font-medium text-stone-700">
             输入文本
@@ -380,6 +479,7 @@ export default function Home() {
                 : "生成卡片"}
           </button>
         </section>
+        )}
 
         {error && (
           <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
@@ -421,6 +521,21 @@ export default function Home() {
                 生成的知识卡片（{cards.length} 张）
               </h2>
               <div className="flex items-center gap-3">
+                {isSignedIn ? (
+                  saveState === "saved" ? (
+                    <span className="text-xs font-medium text-emerald-600">已保存 ✓</span>
+                  ) : (
+                    <button
+                      onClick={saveCards}
+                      disabled={saveState === "saving"}
+                      className="text-xs font-medium text-teal-700 underline hover:text-teal-800 disabled:opacity-50"
+                    >
+                      {saveState === "saving" ? "保存中…" : "保存到我的卡片"}
+                    </button>
+                  )
+                ) : (
+                  <span className="text-xs text-stone-400">登录后可保存</span>
+                )}
                 <button
                   onClick={copyAllCards}
                   className="text-xs text-stone-500 underline hover:text-teal-700"
@@ -474,6 +589,109 @@ export default function Home() {
                 );
               })}
             </div>
+          </section>
+        )}
+
+        {/* ─── 我的复习（间隔重复 SM-2） ─── */}
+        {mode === "review" && (
+          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <h2 className="text-sm font-medium text-stone-700">我的复习</h2>
+
+            {!isSignedIn ? (
+              <div className="flex flex-col items-center gap-3 py-8">
+                <p className="text-sm text-stone-500">登录后即可保存卡片并在此按间隔重复复习。</p>
+                <a
+                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
+                  className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                >
+                  登录
+                </a>
+              </div>
+            ) : reviewMsg ? (
+              <div className="py-10 text-center">
+                <p className="text-lg font-semibold text-stone-900">{reviewMsg}</p>
+                <button
+                  onClick={loadDueCards}
+                  className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                >
+                  再看一下
+                </button>
+              </div>
+            ) : reviewLoading && reviewCards.length === 0 ? (
+              <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+            ) : reviewCards.length === 0 ? (
+              <div className="py-10 text-center">
+                <p className="text-sm text-stone-500">还没有待复习的卡片。</p>
+                <p className="mt-1 text-xs text-stone-400">
+                  去「知识点卡片」生成后点击「保存到我的卡片」即可在这里复习。
+                </p>
+              </div>
+            ) : reviewIndex >= reviewCards.length ? (
+              <div className="py-10 text-center">
+                <p className="text-lg font-semibold text-stone-900">🎉 本轮复习完成！</p>
+                <button
+                  onClick={loadDueCards}
+                  className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                >
+                  刷新待复习
+                </button>
+              </div>
+            ) : (
+              (() => {
+                const card = reviewCards[reviewIndex];
+                const btn =
+                  "flex-1 rounded-lg py-2 text-sm font-medium transition-colors";
+                return (
+                  <div className="flex flex-col gap-4">
+                    <p className="text-xs text-stone-400">
+                      待复习 {reviewIndex + 1} / {reviewCards.length}
+                    </p>
+                    <div className="flex h-64 flex-col justify-between rounded-xl border border-stone-200 bg-white p-5">
+                      <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                        {card?.topic}
+                      </span>
+                      <p className="text-lg font-semibold leading-relaxed text-stone-900">
+                        {card?.question}
+                      </p>
+                      {reviewRevealed ? (
+                        <div className="flex flex-col gap-3">
+                          <p className="border-t border-stone-100 pt-3 text-sm leading-relaxed text-stone-800">
+                            {card?.answer}
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => gradeCard(1)}
+                              className={`${btn} bg-red-50 text-red-600 hover:bg-red-100`}
+                            >
+                              忘记
+                            </button>
+                            <button
+                              onClick={() => gradeCard(3)}
+                              className={`${btn} bg-amber-50 text-amber-700 hover:bg-amber-100`}
+                            >
+                              模糊
+                            </button>
+                            <button
+                              onClick={() => gradeCard(5)}
+                              className={`${btn} bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
+                            >
+                              记得
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setReviewRevealed(true)}
+                          className="self-start rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-100"
+                        >
+                          显示答案
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
           </section>
         )}
 
