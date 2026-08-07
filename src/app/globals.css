@@ -1,8 +1,41 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════
+   学盒 xuebox — 暗色玻璃态设计系统 (Dark Glassmorphism)
+   灵感：YCS Knowledge OS / Obsidian 风格
+   ═══════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── 暗色基底 ── */
+  --background: #07080c;
+  --foreground: #e8eaed;
+
+  /* ── 玻璃态核心变量 ── */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-bg-hover: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.15);
+  --glass-blur: 20px;
+
+  /* ── 品牌色（暗底适配）── */
+  --accent-teal: #2dd4bf;
+  --accent-teal-dim: #14b8a6;
+  --accent-emerald: #34d399;
+  --accent-purple: #a78bfa;
+  --accent-amber: #fbbf24;
+  --accent-coral: #fb7185;
+  --accent-blue: #60a5fa;
+
+  /* ── 文字层级（暗底）── */
+  --text-primary: #f1f3f5;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  /* ── 渐变（用于卡片 accent / 按钮）─── */
+  --gradient-teal: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 50%, #0d9488 100%);
+  --gradient-purple: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+  --gradient-emerald: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  --gradient-surface: radial-gradient(ellipse at top, rgba(45, 212, 191, 0.06) 0%, transparent 60%);
 }
 
 @theme inline {
@@ -10,17 +43,205 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* 暴露玻璃工具类到 Tailwind v4 主题 */
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-emerald: var(--accent-emerald);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ── 全局暗色基底 + 微妙渐变背景 ── */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background-image:
+    radial-gradient(ellipse at 20% 0%, rgba(45, 212, 191, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(167, 139, 250, 0.04) 0%, transparent 50%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════════
+   玻璃态公共组件类
+   ═══════════════════════════════════════════════════ */
+
+/* 玻璃卡片 — 所有面板/卡片的基类 */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 0.5px solid var(--glass-border);
+  border-radius: 16px;
+  transition: background 200ms ease, border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+
+.glass-card:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.glass-card-active {
+  background: rgba(45, 212, 191, 0.06);
+  border-color: rgba(45, 212, 191, 0.2);
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.06), inset 0 0 20px rgba(45, 212, 191, 0.02);
+}
+
+/* 玻璃按钮 */
+.glass-btn {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 0.5px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: 10px;
+  transition: all 180ms ease;
+  cursor: pointer;
+}
+
+.glass-btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.04);
+}
+
+/* 主操作按钮（实心渐变）*/
+.btn-primary-glow {
+  background: var(--gradient-teal);
+  color: #021a17;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.15), inset 0 1px 0 rgba(255,255,255,0.2);
+  transition: all 200ms ease;
+  cursor: pointer;
+}
+
+.btn-primary-glow:hover {
+  box-shadow: 0 0 28px rgba(45, 212, 191, 0.25), inset 0 1px 0 rgba(255,255,255,0.25);
+  transform: translateY(-1px);
+}
+
+.btn-primary-glow:active {
+  transform: translateY(0);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.15);
+}
+
+.btn-primary-glow:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 输入框玻璃态 */
+.glass-input {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 0.5px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: 12px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.glass-input::placeholder {
+  color: var(--text-muted);
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1);
+}
+
+/* Pill 标签（场景选择器等） */
+.glass-pill {
+  background: transparent;
+  border: 0.5px solid var(--glass-border);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 180ms ease;
+  cursor: pointer;
+}
+
+.glass-pill:hover {
+  background: var(--glass-bg);
+  border-color: var(--glass-border-hover);
+  color: var(--text-primary);
+}
+
+.glass-pill-active {
+  background: rgba(45, 212, 191, 0.12);
+  border-color: rgba(45, 212, 191, 0.3);
+  color: var(--accent-teal);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.08);
+}
+
+/* Badge 标签 */
+.glass-badge {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.glass-badge-live {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--accent-emerald);
+  border: 0.5px solid rgba(52, 211, 153, 0.2);
+}
+
+.glass-badge-soon {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  border: 0.5px solid var(--glass-border);
+}
+
+/* 数据指标卡 */
+.metric-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 0.5px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 16px;
+  text-align: center;
+}
+
+/* 分隔线（玻璃态） */
+.glass-divider {
+  height: 0.5px;
+  background: linear-gradient(90deg, transparent, var(--glass-border), transparent);
+  border: none;
+}
+
+/* Toast 提示（暗色） */
+.glass-toast {
+  background: rgba(20, 20, 28, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 0.5px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: 999px;
+}
+
+/* 滚动条（暗色细滚动条）*/
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+/* 选中文本颜色 */
+::selection {
+  background: rgba(45, 212, 191, 0.25);
+  color: #fff;
 }

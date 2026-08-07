@@ -17,14 +17,14 @@ import {
 // 模式切换骨架屏（懒加载子组件时的占位）
 function ViewSkeleton({ title }: { title: string }) {
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-      <div className="h-4 w-24 rounded bg-stone-200" />
+    <section className="glass-card flex flex-col gap-4 p-6">
+      <div className="h-4 w-24 rounded animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }} />
       <div className="flex flex-col gap-3">
-        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
-        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
-        <div className="h-24 w-full animate-pulse rounded-xl bg-stone-100" />
+        <div className="h-24 w-full animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }} />
+        <div className="h-24 w-full animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }} />
+        <div className="h-24 w-full animate-pulse rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }} />
       </div>
-      <span className="text-xs text-stone-400">{title}加载中…</span>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{title}加载中…</span>
     </section>
   );
 }
@@ -177,40 +177,39 @@ function UserMenu() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-teal-700 text-sm font-medium text-white shadow-sm ring-2 ring-white transition-colors hover:bg-teal-800"
+        className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-sm font-medium transition-all duration-200"
+        style={{
+          background: 'var(--gradient-teal)',
+          boxShadow: '0 0 16px rgba(45,212,191,0.15)',
+        }}
         aria-label="用户菜单"
       >
         {user?.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={user.imageUrl}
-            alt=""
-            className="h-full w-full object-cover"
-          />
+          <img src={user.imageUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          <span>
+          <span className="text-white">
             {(user?.firstName?.[0] ?? user?.username?.[0] ?? "我").toUpperCase()}
           </span>
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
-          <a
-            href="https://accounts.xuebox.me/user"
-            target="_blank"
-            rel="noreferrer"
-            className="block px-4 py-2 text-sm text-stone-700 transition-colors hover:bg-stone-50"
-          >
-            管理账户
-          </a>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            disabled={signingOut}
-            className="block w-full px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
-          >
-            {signingOut ? "退出中…" : "退出登录"}
-          </button>
+        <div className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl py-1 shadow-xl"
+          style={{
+            background: 'rgba(15,18,25,0.95)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '0.5px solid var(--glass-border)',
+          }}
+        >
+          <a href="https://accounts.xuebox.me/user" target="_blank" rel="noreferrer"
+            className="block px-4 py-2 text-sm transition-colors hover:bg-white/[0.06]"
+            style={{ color: 'var(--text-secondary)' }}
+          >管理账户</a>
+          <button type="button" onClick={handleSignOut} disabled={signingOut}
+            className="block w-full px-4 py-2 text-left text-sm transition-colors hover:bg-white/[0.06] disabled:opacity-50"
+            style={{ color: 'var(--accent-coral)' }}
+          >{signingOut ? "退出中…" : "退出登录"}</button>
         </div>
       )}
     </div>
@@ -853,11 +852,11 @@ export default function Home() {
 
   return (
     <>
-      {/* 品牌顶栏 */}
-      <div className="h-1.5 w-full bg-gradient-to-r from-teal-500 via-teal-500 to-emerald-500" />
+      {/* 微妙品牌顶线 */}
+      <div className="h-[2px] w-full opacity-40" style={{ background: 'linear-gradient(90deg, transparent, var(--accent-teal), var(--accent-purple), transparent)' }} />
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
-        {/* ─── Header ─── */}
+        {/* ─── Header（暗色玻璃态） ─── */}
         <header className="flex items-start justify-between gap-4">
           <button
             type="button"
@@ -865,44 +864,39 @@ export default function Home() {
               switchMode("outline");
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
-            className="flex items-start gap-3 text-left cursor-pointer rounded-lg -m-1 p-1 transition-colors hover:bg-stone-50"
+            className="group flex items-start gap-3.5 text-left cursor-pointer rounded-2xl p-3 -ml-3 transition-all duration-200 hover:bg-white/[0.03]"
             aria-label="返回首页（提纲生成）"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-sm">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-              >
+            {/* Logo — 渐变玻璃方块 */}
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow-lg"
+                 style={{ background: 'var(--gradient-teal)', boxShadow: '0 0 24px rgba(45,212,191,0.2)' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
                 <path d="M12 6c-2-1.5-5-1.5-7 0v12c2-1.5 5-1.5 7 0 2-1.5 5-1.5 7 0V6c-2-1.5-5-1.5-7 0Z" />
                 <path d="M12 6v12" />
               </svg>
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
-                  复习提纲<span className="text-teal-700">生成器</span>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-2xl font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+                  复习提纲<span style={{ color: 'var(--accent-teal)' }}>生成器</span>
                 </h1>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                <span className="glass-badge" style={{ background: 'rgba(251,191,36,0.1)', color: 'var(--accent-amber)', borderColor: 'rgba(251,191,36,0.2)' }}>
                   测试版
                 </span>
               </div>
-              <p className="mt-1 text-sm text-stone-500">
+              <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                 粘贴课件 / 笔记文本，或上传 PDF / 图片，一键生成结构化复习提纲。
               </p>
             </div>
           </button>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 pt-1">
             {isSignedIn ? (
               <UserMenu />
             ) : (
               <a
                 href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
-                className="inline-block rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800"
+                className="glass-btn inline-flex items-center gap-1.5 px-5 py-2 text-sm font-medium"
+                style={{ borderColor: 'rgba(45,212,191,0.25)', color: 'var(--accent-teal)' }}
               >
                 登录
               </a>
@@ -913,17 +907,13 @@ export default function Home() {
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-stone-400">备考场景：</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>备考场景</span>
           {SCENARIOS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setScenario(s)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                scenario === s
-                  ? "bg-teal-700 text-white shadow-sm"
-                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-              }`}
+              className={scenario === s ? "glass-pill-active" : "glass-pill"}
             >
               {s}
             </button>
@@ -944,12 +934,10 @@ export default function Home() {
             setDragOver(false);
             handleFile(e.dataTransfer.files?.[0]);
           }}
-          className={`flex flex-col gap-3 rounded-2xl border bg-white p-6 shadow-sm transition-colors ${
-            dragOver ? "border-teal-500 ring-2 ring-teal-500/30" : "border-stone-200"
-          }`}
+          className={`glass-card flex flex-col gap-4 p-6 ${dragOver ? 'glass-card-active' : ''}`}
         >
           <div className="flex items-center justify-between gap-3">
-            <label htmlFor="source" className="text-sm font-medium text-stone-700">
+            <label htmlFor="source" className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               输入文本
             </label>
             <div className="flex items-center gap-2">
@@ -964,9 +952,11 @@ export default function Home() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={extracting}
-                className="inline-flex items-center gap-1 rounded-full border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:border-teal-500 hover:text-teal-700 disabled:opacity-60"
+                className="glass-btn inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium disabled:opacity-50"
+                style={{ borderColor: dragOver ? 'rgba(45,212,191,0.3)' : undefined }}
               >
-                {extracting ? "解析中…" : "📎 上传 PDF / 图片"}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                {extracting ? "解析中…" : "上传 PDF / 图片"}
               </button>
             </div>
           </div>
@@ -981,16 +971,16 @@ export default function Home() {
                   ? "粘贴要出成自测题的资料，或上传 PDF / 图片自动提取……"
                   : "粘贴要拆解成卡片的笔记内容，或上传 PDF / 图片自动提取……"
             }
-            className="h-48 w-full resize-y rounded-xl border border-stone-300 bg-white p-3 text-sm text-stone-900 shadow-sm outline-none transition-colors placeholder:text-stone-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+            className="glass-input h-44 w-full resize-y p-4 text-sm leading-relaxed placeholder:text-sm"
           />
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-stone-400">
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {extractMsg || (dragOver ? "松开即可提取文字" : "支持拖拽文件到此处")}
             </span>
             <button
               onClick={mode === "quiz" ? generateQuiz : handleGenerate}
               disabled={loading || quizLoading || extracting}
-              className="self-start rounded-full bg-teal-700 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-teal-800 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn-primary-glow self-start px-6 py-2.5 text-sm"
             >
               {mode === "quiz"
                 ? quizLoading
@@ -1007,63 +997,46 @@ export default function Home() {
         )}
 
         {error && (
-          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-            <p>{error}</p>
+          <div className="glass-card px-4 py-3" style={{ background: 'rgba(251,113,133,0.08)', borderColor: 'rgba(251,113,133,0.15)' }}>
+            <p className="text-sm" style={{ color: 'var(--accent-coral)' }}>{error}</p>
           </div>
         )}
 
         {/* ─── 提纲结果 ─── */}
         {mode === "outline" && outline && (
-          <section className="flex flex-col gap-2 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+          <section className="glass-card flex flex-col gap-3 p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-stone-700">生成的提纲</h2>
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>生成的提纲</h2>
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => navigator.clipboard?.writeText(outline)}
-                  className="text-xs text-stone-500 underline hover:text-teal-700"
-                >
+                <button onClick={() => navigator.clipboard?.writeText(outline)} className="text-xs underline opacity-60 hover:opacity-100 transition-opacity" style={{ color: 'var(--accent-teal)' }}>
                   复制
                 </button>
-                <button
-                  onClick={exportOutlineMd}
-                  className="text-xs text-stone-500 underline hover:text-teal-700"
-                >
+                <button onClick={exportOutlineMd} className="text-xs underline opacity-60 hover:opacity-100 transition-opacity" style={{ color: 'var(--accent-teal)' }}>
                   下载 .md
                 </button>
               </div>
             </div>
-            <pre className="whitespace-pre-wrap break-words rounded-xl border border-stone-100 bg-stone-50 p-4 text-sm leading-7 text-stone-800">
+            <pre className="whitespace-pre-wrap break-words rounded-xl p-4 text-sm leading-7" style={{ background: 'rgba(0,0,0,0.25)', color: 'var(--text-primary)', border: '0.5px solid var(--glass-border)' }}>
               {outline}
             </pre>
             {/* 收藏提纲 */}
-            <div className="mt-2 flex flex-col gap-2 border-t border-stone-100 pt-3">
+            <div className="mt-1 flex flex-col gap-2 border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={outlineTitleInput}
-                  onChange={(e) => setOutlineTitleInput(e.target.value)}
-                  placeholder="提纲标题（可选）"
-                  className="w-40 rounded-lg border border-stone-300 px-2 py-1 text-xs outline-none focus:border-teal-500"
-                />
-                <input
-                  value={outlineTagInput}
-                  onChange={(e) => setOutlineTagInput(e.target.value)}
-                  placeholder="标签，逗号分隔（可选）"
-                  className="w-44 rounded-lg border border-stone-300 px-2 py-1 text-xs outline-none focus:border-teal-500"
-                />
+                <input value={outlineTitleInput} onChange={(e) => setOutlineTitleInput(e.target.value)} placeholder="提纲标题（可选）"
+                  className="glass-input w-40 px-2 py-1 text-xs" />
+                <input value={outlineTagInput} onChange={(e) => setOutlineTagInput(e.target.value)} placeholder="标签，逗号分隔（可选）"
+                  className="glass-input w-44 px-2 py-1 text-xs" />
                 {isSignedIn ? (
                   saveOutlineState === "saved" ? (
-                    <span className="text-xs font-medium text-emerald-600">已收藏 ✓</span>
+                    <span className="text-xs font-medium" style={{ color: 'var(--accent-emerald)' }}>已收藏 ✓</span>
                   ) : (
-                    <button
-                      onClick={saveOutline}
-                      disabled={saveOutlineState === "saving"}
-                      className="rounded-full bg-teal-700 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50"
-                    >
+                    <button onClick={saveOutline} disabled={saveOutlineState === "saving"}
+                      className="btn-primary-glow px-3 py-1 text-xs disabled:opacity-50">
                       {saveOutlineState === "saving" ? "收藏中…" : "保存到我的提纲"}
                     </button>
                   )
                 ) : (
-                  <span className="text-xs text-stone-400">登录后可收藏</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>登录后可收藏</span>
                 )}
               </div>
             </div>
@@ -1072,75 +1045,63 @@ export default function Home() {
 
         {/* ─── 卡片结果（翻转交互） ─── */}
         {mode === "flashcard" && cards.length > 0 && (
-          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-stone-700">
+          <section className="glass-card flex flex-col gap-4 p-6">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                 生成的知识卡片（{cards.length} 张）
               </h2>
               <div className="flex items-center gap-3">
                 {isSignedIn ? (
                   saveState === "saved" ? (
-                    <span className="text-xs font-medium text-emerald-600">已保存 ✓</span>
+                    <span className="text-xs font-medium" style={{ color: 'var(--accent-emerald)' }}>已保存 ✓</span>
                   ) : (
-                    <button
-                      onClick={saveCards}
-                      disabled={saveState === "saving"}
-                      className="text-xs font-medium text-teal-700 underline hover:text-teal-800 disabled:opacity-50"
-                    >
+                    <button onClick={saveCards} disabled={saveState === "saving"}
+                      className="text-xs font-medium underline opacity-70 hover:opacity-100 disabled:opacity-50" style={{ color: 'var(--accent-teal)' }}>
                       {saveState === "saving" ? "保存中…" : "保存到我的卡片"}
                     </button>
                   )
                 ) : (
-                  <span className="text-xs text-stone-400">登录后可保存</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>登录后可保存</span>
                 )}
-                <button
-                  onClick={copyAllCards}
-                  className="text-xs text-stone-500 underline hover:text-teal-700"
-                >
-                  复制全部
-                </button>
-                <button
-                  onClick={exportAnki}
-                  className="text-xs text-stone-500 underline hover:text-teal-700"
-                >
-                  导出 Anki
-                </button>
-                <span className="text-xs text-stone-400">点击卡片翻转查看答案</span>
+                <button onClick={copyAllCards} className="text-xs underline opacity-60 hover:opacity-100" style={{ color: 'var(--accent-teal)' }}>复制全部</button>
+                <button onClick={exportAnki} className="text-xs underline opacity-60 hover:opacity-100" style={{ color: 'var(--accent-teal)' }}>导出 Anki</button>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>点击卡片翻转查看答案</span>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {cards.map((card, i) => {
                 const isFlipped = flipped.has(i);
                 return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => toggleFlip(i)}
-                    className={`group relative flex h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-stone-200 p-5 text-left shadow-sm transition-all duration-300 hover:border-teal-300 hover:shadow-md ${
-                      isFlipped
-                        ? "bg-gradient-to-br from-teal-50 to-emerald-50"
-                        : "bg-white"
+                  <button key={i} type="button" onClick={() => toggleFlip(i)}
+                    className={`group relative flex h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-xl border p-5 text-left transition-all duration-300 ${
+                      isFlipped ? 'border-teal-500/30' : 'border-white/[0.06]'
                     }`}
+                    style={{
+                      background: isFlipped ? 'rgba(45,212,191,0.06)' : 'rgba(255,255,255,0.03)',
+                      backdropFilter: 'blur(8px)',
+                    }}
                   >
                     {/* 正面：问题 */}
                     <div className={`flex h-full flex-col justify-between ${isFlipped ? "hidden" : ""}`}>
-                      <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                      <span className="inline-block self-start rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        style={{ background: 'rgba(45,212,191,0.12)', color: 'var(--accent-teal)' }}>
                         {card.topic}
                       </span>
-                      <p className="text-base font-semibold leading-relaxed text-stone-900">
+                      <p className="text-base font-semibold leading-relaxed" style={{ color: 'var(--text-primary)' }}>
                         {card.question}
                       </p>
-                      <p className="text-xs text-stone-400">点击查看答案 ↓</p>
+                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>点击查看答案 ↓</p>
                     </div>
                     {/* 背面：答案 */}
                     <div className={`flex h-full flex-col justify-center ${!isFlipped ? "hidden" : ""}`}>
-                      <span className="mb-2 inline-block self-start rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-800">
+                      <span className="mb-2 inline-block self-start rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        style={{ background: 'rgba(45,212,191,0.18)', color: 'var(--accent-teal)' }}>
                         {card.topic} · 答案
                       </span>
-                      <p className="text-base leading-relaxed text-stone-800">
+                      <p className="text-base leading-relaxed" style={{ color: 'var(--text-primary)' }}>
                         {card.answer}
                       </p>
-                      <p className="mt-3 text-xs text-stone-400">点击返回问题 ↑</p>
+                      <p className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>点击返回问题 ↑</p>
                     </div>
                   </button>
                 );
@@ -1226,65 +1187,61 @@ export default function Home() {
         />
         )}
 
-        {/* ─── 更多学习工具板块（可点击入口） ─── */}
-        <section className="flex flex-col gap-3 sm:gap-4">
+        {/* ─── 学习工具板块 ─── */}
+        <section className="flex flex-col gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-stone-900">更多学习工具</h2>
-            <p className="mt-1 text-sm text-stone-500">
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>学习工具</h2>
+            <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
               学盒正在长成你的全能学习助手，以下功能陆续上线。
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f) => {
+            {FEATURES.map((f, idx) => {
               const isActive = f.live && !!f.mode && mode === f.mode;
+              // 为每个已上线功能分配不同 accent 色
+              const accents = [
+                'var(--accent-teal)',     // 知识点卡片
+                'var(--accent-purple)',    // 自测题
+                'var(--accent-emerald)',   // 我的复习
+                'var(--accent-coral)',     // 错题本
+              ];
+              const accentColor = f.live ? (accents[idx % accents.length] || 'var(--accent-teal)') : undefined;
               return (
                 <button
                   key={f.title}
                   type="button"
                   onClick={() => handleFeatureClick(f)}
-                  className={`group flex flex-col gap-2.5 sm:gap-3 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all duration-200 cursor-pointer sm:p-5
-                    ${
-                      isActive
-                        ? "border-teal-400 ring-2 ring-teal-500/20 -translate-y-0.5 shadow-md"
-                        : "border-stone-200 hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md"
-                    }`}
+                  className={`group flex flex-col gap-3 p-5 text-left transition-all duration-200 cursor-pointer ${
+                    isActive ? 'glass-card-active' : 'glass-card hover:-translate-y-0.5'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${isActive ? "bg-teal-100 text-teal-700" : "bg-teal-50 text-teal-600"}`}>
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={1.8}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-5 w-5"
-                      >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl"
+                      style={{
+                        background: isActive ? `${accentColor}18` : 'rgba(255,255,255,0.05)',
+                        color: accentColor || 'var(--text-secondary)',
+                        boxShadow: isActive ? `0 0 16px ${accentColor}15` : 'none',
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
                         {ICONS[f.title]}
                       </svg>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                        f.live
-                          ? isActive
-                            ? "bg-teal-100 text-teal-700"
-                            : "bg-emerald-100 text-emerald-700"
-                          : "bg-teal-50 text-teal-700"
-                      }`}
-                    >
+                    <span className={f.live ? "glass-badge glass-badge-live" : "glass-badge glass-badge-soon"}>
                       {f.live ? (isActive ? "当前" : "已上线") : "即将上线"}
                     </span>
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-stone-900">
+                    <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
                       {f.title}
                     </h3>
-                    <p className="mt-1 text-sm leading-6 text-stone-500">
+                    <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                       {f.desc}
                     </p>
                   </div>
                   {f.live && (
-                    <span className="text-xs font-medium text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                      style={{ color: accentColor || 'var(--accent-teal)' }}>
                       点击进入 →
                     </span>
                   )}
@@ -1296,12 +1253,12 @@ export default function Home() {
 
         {/* ─── Toast 提示 ─── */}
         {toastMsg && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-full bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg">
+          <div className="glass-toast fixed bottom-6 left-1/2 z-50 px-5 py-2.5 text-sm font-medium shadow-xl">
             {toastMsg}
           </div>
         )}
 
-        <footer className="pt-2 text-center text-xs text-stone-400">
+        <footer className="pt-4 text-center text-xs tracking-wide" style={{ color: 'var(--text-muted)' }}>
           学盒 xuebox · 测试版 · 让学习更轻松
         </footer>
       </main>
