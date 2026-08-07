@@ -57,8 +57,8 @@ const ICONS: Record<string, React.ReactNode> = {
 const FEATURES = [
   {
     title: "错题本整理",
-    desc: "拍照或粘贴错题，自动归类知识点与易错原因，生成专属错题集。",
-    live: false,
+    desc: "汇总自测答错的题与上传的错题，标注来源与原文依据，支持溯源高亮。",
+    live: true,
   },
   {
     title: "知识点卡片",
@@ -87,8 +87,8 @@ const FEATURES = [
   },
 ];
 
-type Mode = "outline" | "flashcard" | "review" | "quiz";
-type ReviewView = "due" | "collection" | "outlines" | "mistakes";
+type Mode = "outline" | "flashcard" | "review" | "quiz" | "mistakes";
+type ReviewView = "due" | "collection" | "outlines";
 type CardStatus = "all" | "new" | "weak" | "fuzzy" | "mastered";
 
 interface Card {
@@ -236,6 +236,7 @@ export default function Home() {
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [mistakeOrigin, setMistakeOrigin] = useState<"all" | "quiz" | "upload">("all");
   const [mistakeLoading, setMistakeLoading] = useState(false);
+  const [openMistakeId, setOpenMistakeId] = useState<string | null>(null); // 展开查看原文（高亮依据）
 
   // 评分防重复点击（乐观更新用）
   const gradingRef = useRef(false);
@@ -343,7 +344,7 @@ export default function Home() {
     return { correct, total };
   }
 
-  // 把答错的题收入错题集（溯源：带上源文本与依据引文）
+  // 把答错的题收入错题本（溯源：带上源文本与依据引文）
   async function saveMistake(qi: number) {
     const q = quiz[qi];
     if (!q) return;
@@ -617,13 +618,15 @@ export default function Home() {
     return { label: "掌握", cls: "bg-emerald-100 text-emerald-700" };
   }
 
-  // 进入"我的复习"且已登录时，按子视图拉取数据
+  // 进入"我的复习"且已登录时，按子视图拉取数据；进入"错题本"则拉错题
   useEffect(() => {
-    if (mode === "review" && isSignedIn) {
+    if (!isSignedIn) return;
+    if (mode === "review") {
       if (reviewView === "due") loadDueCards();
       else if (reviewView === "collection") loadCollection();
       else if (reviewView === "outlines") loadOutlines();
-      else if (reviewView === "mistakes") loadMistakes();
+    } else if (mode === "mistakes") {
+      loadMistakes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isSignedIn, reviewView]);
@@ -740,6 +743,26 @@ export default function Home() {
     return text;
   }
 
+  /**
+   * 溯源高亮：在原文中把依据句（evidence）高亮出来。
+   * 纯字符串匹配，无需向量库 / embedding；若依据不在原文中则原样返回。
+   */
+  function highlightSource(src: string, evidence: string | null) {
+    if (!evidence || !src) return src;
+    if (src.indexOf(evidence) === -1) return src;
+    const parts = src.split(evidence);
+    return parts.map((part, i) => (
+      <span key={i}>
+        {part}
+        {i < parts.length - 1 ? (
+          <mark className="rounded bg-amber-200 px-0.5 text-stone-900">
+            {evidence}
+          </mark>
+        ) : null}
+      </span>
+    ));
+  }
+
   return (
     <>
       {/* 品牌顶栏 */}
@@ -832,6 +855,16 @@ export default function Home() {
             }`}
           >
             🧠 自测题
+          </button>
+          <button
+            onClick={() => switchMode("mistakes")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "mistakes"
+                ? "bg-white text-teal-700 shadow-sm"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            📕 错题本
           </button>
         </div>
 
@@ -1156,18 +1189,18 @@ export default function Home() {
                                 「{q.evidence}」
                               </div>
                             ) : null}
-                            {/* 答错 → 收入错题集 */}
+                            {/* 答错 → 收入错题本 */}
                             {picked !== q.answer &&
                               (savedQuizIdx.has(gi) ? (
                                 <span className="text-xs font-medium text-emerald-600">
-                                  ✓ 已收入错题集
+                                  ✓ 已收入错题本
                                 </span>
                               ) : !isSignedIn ? (
                                 <a
                                   href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
                                   className="self-start text-xs text-teal-700 underline hover:text-teal-800"
                                 >
-                                  登录后收入错题集
+                                  登录后收入错题本
                                 </a>
                               ) : (
                                 <button
@@ -1177,7 +1210,7 @@ export default function Home() {
                                 >
                                   {saveMistakeState === "saving" && saveMistakeIdx === gi
                                     ? "收录中…"
-                                    : "收入错题集"}
+                                    : "收入错题本"}
                                 </button>
                               ))}
                           </div>
@@ -1232,7 +1265,6 @@ export default function Home() {
                     ["due", "今日复习"],
                     ["collection", "卡片题集"],
                     ["outlines", "我的提纲"],
-                    ["mistakes", "错题集"],
                   ] as const).map(([v, label]) => (
                     <button
                       key={v}
@@ -1587,102 +1619,135 @@ export default function Home() {
                     </div>
                   ))}
 
-                {/* ── 错题集（quiz 来源 + 上传来源，分组展示） ── */}
-                {reviewView === "mistakes" &&
-                  (mistakeLoading && mistakes.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-                  ) : mistakes.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm text-stone-500">还没有错题。</p>
-                      <p className="mt-1 text-xs text-stone-400">
-                        去「🧠 自测题」答题，答错的题可点「收入错题集」沉淀到这里。
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-4">
-                      {/* 来源分组 chips（自测 / 上传 分开） */}
-                      <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
-                        {([
-                          ["all", "全部"],
-                          ["quiz", "自测错题"],
-                          ["upload", "上传错题"],
-                        ] as const).map(([v, label]) => (
-                          <button
-                            key={v}
-                            onClick={() => setMistakeOrigin(v)}
-                            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                              mistakeOrigin === v
-                                ? "bg-white text-teal-700 shadow-sm"
-                                : "text-stone-600 hover:text-stone-900"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {mistakes
-                        .filter(
-                          (m) => mistakeOrigin === "all" || m.origin === mistakeOrigin,
-                        )
-                        .map((m) => (
-                          <div
-                            key={m.id}
-                            className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
-                          >
-                            <span
-                              className={`self-start rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                m.origin === "quiz"
-                                  ? "bg-teal-50 text-teal-700"
-                                  : "bg-purple-50 text-purple-700"
-                              }`}
-                            >
-                              {m.origin === "quiz" ? "自测错题" : "上传错题"}
-                            </span>
-                            <p className="text-sm font-medium leading-relaxed text-stone-900">
-                              {m.question}
-                            </p>
-                            <div className="flex flex-col gap-1">
-                              {m.options.map((opt, oi) => {
-                                const isCorrect = oi === m.answer;
-                                const isPicked = m.picked === oi;
-                                let cls =
-                                  "rounded-lg border px-3 py-1.5 text-xs ";
-                                if (isCorrect)
-                                  cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
-                                else if (isPicked)
-                                  cls += "border-red-300 bg-red-50 text-red-700";
-                                else cls += "border-stone-200 bg-white text-stone-400";
-                                return (
-                                  <div key={oi} className={cls}>
-                                    {opt}
-                                    {isCorrect ? " ✓" : isPicked ? " （你的答案）" : ""}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            {m.explanation && (
-                              <p className="text-xs leading-relaxed text-stone-500">
-                                {m.explanation}
-                              </p>
-                            )}
-                            {/* 溯源：依据 + 出处 */}
-                            {m.evidence && (
-                              <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
-                                <span className="font-medium text-stone-500">📌 原文依据：</span>
-                                「{m.evidence}」
-                              </div>
-                            )}
-                            {m.source_title && (
-                              <p className="text-xs text-stone-400">
-                                出处：{m.source_title}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  ))}
+                {/* 错题集已升级为顶级「📕 错题本」Tab（见下方 mode === "mistakes" 区块） */}
               </>
+            )}
+          </section>
+        )}
+
+        {/* ─── 错题本（汇总自测错题 + 上传错题，标注来源与原文依据，支持溯源高亮） ─── */}
+        {mode === "mistakes" && (
+          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-stone-700">错题本</h2>
+              <span className="text-xs text-stone-400">共 {mistakes.length} 题</span>
+            </div>
+
+            {!isSignedIn ? (
+              <div className="flex flex-col items-center gap-3 py-8">
+                <p className="text-sm text-stone-500">登录后即可查看你的错题本。</p>
+                <a
+                  href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
+                  className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                >
+                  登录
+                </a>
+              </div>
+            ) : mistakeLoading && mistakes.length === 0 ? (
+              <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+            ) : mistakes.length === 0 ? (
+              <div className="py-10 text-center">
+                <p className="text-sm text-stone-500">错题本还是空的。</p>
+                <p className="mt-1 text-xs text-stone-400">
+                  去「🧠 自测题」答题，答错的题点「收入错题本」即可沉淀到这里。
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {/* 来源分组 chips（来自自测题 / 上传错题 分开） */}
+                <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
+                  {([
+                    ["all", "全部"],
+                    ["quiz", "来自自测题"],
+                    ["upload", "上传错题"],
+                  ] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setMistakeOrigin(v)}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        mistakeOrigin === v
+                          ? "bg-white text-teal-700 shadow-sm"
+                          : "text-stone-600 hover:text-stone-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {mistakes
+                  .filter((m) => mistakeOrigin === "all" || m.origin === mistakeOrigin)
+                  .map((m) => {
+                    const open = openMistakeId === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
+                      >
+                        <span
+                          className={`self-start rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            m.origin === "quiz"
+                              ? "bg-teal-50 text-teal-700"
+                              : "bg-purple-50 text-purple-700"
+                          }`}
+                        >
+                          {m.origin === "quiz" ? "来自自测题" : "上传错题"}
+                        </span>
+                        <p className="text-sm font-medium leading-relaxed text-stone-900">
+                          {m.question}
+                        </p>
+                        <div className="flex flex-col gap-1">
+                          {m.options.map((opt, oi) => {
+                            const isCorrect = oi === m.answer;
+                            const isPicked = m.picked === oi;
+                            let cls = "rounded-lg border px-3 py-1.5 text-xs ";
+                            if (isCorrect)
+                              cls += "border-emerald-300 bg-emerald-50 text-emerald-800";
+                            else if (isPicked)
+                              cls += "border-red-300 bg-red-50 text-red-700";
+                            else cls += "border-stone-200 bg-white text-stone-400";
+                            return (
+                              <div key={oi} className={cls}>
+                                {opt}
+                                {isCorrect ? " ✓" : isPicked ? " （你的答案）" : ""}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {m.explanation && (
+                          <p className="text-xs leading-relaxed text-stone-500">
+                            {m.explanation}
+                          </p>
+                        )}
+                        {/* 溯源：依据 + 出处 */}
+                        {m.evidence && (
+                          <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs leading-relaxed text-stone-600">
+                            <span className="font-medium text-stone-500">📌 原文依据：</span>
+                            「{m.evidence}」
+                          </div>
+                        )}
+                        {m.source_title && (
+                          <p className="text-xs text-stone-400">出处：{m.source_title}</p>
+                        )}
+                        {/* 溯源高亮：展开原文，依据句高亮 */}
+                        {m.source_text && (
+                          <button
+                            type="button"
+                            onClick={() => setOpenMistakeId(open ? null : m.id)}
+                            className="self-start text-xs text-teal-700 underline hover:text-teal-800"
+                          >
+                            {open ? "收起原文" : "📄 查看原文（依据高亮）"}
+                          </button>
+                        )}
+                        {open && m.source_text && (
+                          <div className="max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-stone-100 bg-stone-50 p-3 text-xs leading-7 text-stone-700">
+                            {highlightSource(m.source_text, m.evidence)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
             )}
           </section>
         )}
