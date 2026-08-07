@@ -180,6 +180,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const { isSignedIn } = useUser();
 
+  // 文件输入（PDF/图片 → 浏览器端抽取文本，复用现有生成管线）
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+
   // 知识点卡片状态
   const [cards, setCards] = useState<Card[]>([]);
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
@@ -501,6 +507,71 @@ export default function Home() {
     }
   }
 
+  // ─── 文件 → 文本（浏览器端，避免引入新 API / 数据库） ───
+  async function handleFile(file?: File | null) {
+    if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImage = file.type.startsWith("image/");
+    if (!isPdf && !isImage) {
+      setError("仅支持 PDF 或图片（png/jpg/webp）。");
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setError("文件过大（>25MB），请先压缩后再上传。");
+      return;
+    }
+    setExtracting(true);
+    setError("");
+    setExtractMsg(isPdf ? "正在解析 PDF…" : "正在识别图片文字…");
+    try {
+      const extracted = isPdf ? await extractPdfText(file) : await ocrImage(file);
+      const trimmed = extracted.replace(/\s+/g, " ").trim();
+      if (!trimmed) {
+        setError("没能提取到文字，请确认文件内容清晰或换一份再试。");
+      } else {
+        setText((prev) => (prev ? prev + "\n\n" + trimmed : trimmed));
+        setExtractMsg(`已提取 ${trimmed.length} 字，可点击生成。`);
+      }
+    } catch (e) {
+      console.error("[extract] 失败:", e);
+      setError("解析失败：" + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setExtracting(false);
+      setTimeout(() => setExtractMsg(""), 4000);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  // PDF：pdfjs-dist 浏览器端抽文字
+  async function extractPdfText(file: File): Promise<string> {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    let out = "";
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      out +=
+        content.items
+          .map((it) => ("str" in it ? (it as { str: string }).str : ""))
+          .join(" ") + "\n";
+    }
+    return out;
+  }
+
+  // 图片：tesseract.js 浏览器端 OCR（印刷体中文/英文）
+  async function ocrImage(file: File): Promise<string> {
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker("chi_sim+eng");
+    try {
+      const { data } = await worker.recognize(file);
+      return data.text || "";
+    } finally {
+      await worker.terminate();
+    }
+  }
+
   return (
     <>
       {/* 品牌顶栏 */}
@@ -534,7 +605,7 @@ export default function Home() {
                 </span>
               </div>
               <p className="mt-1 text-sm text-stone-500">
-                粘贴课件 / 笔记文本，一键生成结构化复习提纲。
+                粘贴课件 / 笔记文本，或上传 PDF / 图片，一键生成结构化复习提纲。
               </p>
             </div>
           </div>
@@ -607,32 +678,70 @@ export default function Home() {
 
         {/* ─── 核心功能区（共用输入框，仅提纲/卡片模式） ─── */}
         {mode !== "review" && (
-        <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-          <label htmlFor="source" className="text-sm font-medium text-stone-700">
-            输入文本
-          </label>
+        <section
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            handleFile(e.dataTransfer.files?.[0]);
+          }}
+          className={`flex flex-col gap-3 rounded-2xl border bg-white p-6 shadow-sm transition-colors ${
+            dragOver ? "border-teal-500 ring-2 ring-teal-500/30" : "border-stone-200"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="source" className="text-sm font-medium text-stone-700">
+              输入文本
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,image/*"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={extracting}
+                className="inline-flex items-center gap-1 rounded-full border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:border-teal-500 hover:text-teal-700 disabled:opacity-60"
+              >
+                {extracting ? "解析中…" : "📎 上传 PDF / 图片"}
+              </button>
+            </div>
+          </div>
           <textarea
             id="source"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={
               mode === "outline"
-                ? "把课件或笔记内容粘贴到这里……"
-                : "粘贴要拆解成卡片的笔记内容……"
+                ? "把课件或笔记内容粘贴到这里，或上传 PDF / 图片自动提取……"
+                : "粘贴要拆解成卡片的笔记内容，或上传 PDF / 图片自动提取……"
             }
             className="h-48 w-full resize-y rounded-xl border border-stone-300 bg-white p-3 text-sm text-stone-900 shadow-sm outline-none transition-colors placeholder:text-stone-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
           />
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            className="self-start rounded-full bg-teal-700 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-teal-800 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading
-              ? "生成中…"
-              : mode === "outline"
-                ? "生成提纲"
-                : "生成卡片"}
-          </button>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-stone-400">
+              {extractMsg || (dragOver ? "松开即可提取文字" : "支持拖拽文件到此处")}
+            </span>
+            <button
+              onClick={handleGenerate}
+              disabled={loading || extracting}
+              className="self-start rounded-full bg-teal-700 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-teal-800 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading
+                ? "生成中…"
+                : mode === "outline"
+                  ? "生成提纲"
+                  : "生成卡片"}
+            </button>
+          </div>
         </section>
         )}
 
