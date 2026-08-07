@@ -89,22 +89,47 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M12 7v5l3 2" />
     </>
   ),
+  自测题: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
+    </>
+  ),
+  我的复习: (
+    <>
+      <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+    </>
+  ),
 };
 
 // ─── 板块数据（知识点卡片已上线，其余仍占位） ──────────
 // live=true 表示功能已可点击进入；mode 绑定点击后切换到的顶部模式
 const FEATURES = [
   {
+    title: "知识点卡片",
+    desc: "把长篇笔记拆成可记忆的小卡片，支持翻面记忆与间隔重复。",
+    live: true,
+    mode: "flashcard" as Mode,
+  },
+  {
+    title: "自测题",
+    desc: "从资料生成选择题，主动回忆检测掌握程度，答错的自动入错题本。",
+    live: true,
+    mode: "quiz" as Mode,
+  },
+  {
+    title: "我的复习",
+    desc: "按遗忘曲线安排每日复习队列，卡片题集分组标签管理。",
+    live: true,
+    mode: "review" as Mode,
+  },
+  {
     title: "错题本整理",
     desc: "汇总自测答错的题与上传的错题，标注来源与原文依据，支持溯源高亮。",
     live: true,
     mode: "mistakes" as Mode,
-  },
-  {
-    title: "知识点卡片",
-    desc: "把长篇笔记拆成可记忆的小卡片，支持间隔重复复习。",
-    live: true,
-    mode: "review" as Mode,
   },
   {
     title: "PDF 智能问答",
@@ -834,7 +859,15 @@ export default function Home() {
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
         {/* ─── Header ─── */}
         <header className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              switchMode("outline");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="flex items-start gap-3 text-left cursor-pointer rounded-lg -m-1 p-1 transition-colors hover:bg-stone-50"
+            aria-label="返回首页（提纲生成）"
+          >
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-sm">
               <svg
                 viewBox="0 0 24 24"
@@ -862,7 +895,7 @@ export default function Home() {
                 粘贴课件 / 笔记文本，或上传 PDF / 图片，一键生成结构化复习提纲。
               </p>
             </div>
-          </div>
+          </button>
           <div className="flex shrink-0 items-center gap-2">
             {isSignedIn ? (
               <UserMenu />
@@ -876,27 +909,6 @@ export default function Home() {
             )}
           </div>
         </header>
-
-        {/* ─── 模式切换 Tab（仅核心输入模式；复习/错题本通过下方卡片进入） ─── */}
-        <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit overflow-x-auto flex-nowrap sm:overflow-x-visible">
-          {([
-            ["outline", "📝 提纲生成"],
-            ["flashcard", "🎴 知识点卡片"],
-            ["quiz", "🧠 自测题"],
-          ] as const).map(([m, label]) => (
-            <button
-              key={m}
-              onClick={() => switchMode(m)}
-              className={`shrink-0 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                mode === m
-                  ? "bg-white text-teal-700 shadow-sm"
-                  : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
 
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
