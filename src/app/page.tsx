@@ -98,13 +98,19 @@ interface Card {
 function UserMenu() {
   const { user } = useUser();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
-  // 直接跳转 Clerk 托管的 /sign-out 页面，
-  // 由 Clerk 服务端负责销毁 session + 清除 cookie + 跳回首页。
-  // 完全绕开客户端 signOut() API 调用（在 EdgeOne 下会返回 unexpected response）。
-  const clerkSignOutUrl =
-    "https://clerk.xuebox.me/sign-out?redirect_url=" +
-    encodeURIComponent("https://xuebox.me/");
+  // 调用本项目自有的 /api/sign-out（服务端吊销 session + 清 cookie + 跳回首页），
+  // 完全绕开客户端 signOut() SDK（EdgeOne 下返回 unexpected response）与 Clerk 托管页（404）。
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await fetch("/api/sign-out", { method: "POST" });
+    } catch {
+      // 即使请求异常，服务端已尽力清 cookie；下面强制刷新仍能复位状态
+    }
+    window.location.assign("/");
+  };
 
   return (
     <div className="relative">
@@ -137,12 +143,14 @@ function UserMenu() {
           >
             管理账户
           </a>
-          <a
-            href={clerkSignOutUrl}
-            className="block px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50"
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="block w-full px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
           >
-            退出登录
-          </a>
+            {signingOut ? "退出中…" : "退出登录"}
+          </button>
         </div>
       )}
     </div>
