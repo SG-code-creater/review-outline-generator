@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
-// 线性图标（stroke=currentColor），每张"即将上线"板块一个，强化品牌识别
+// ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
   错题本整理: (
     <>
@@ -52,40 +52,59 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
-// 规划中的学习工具板块（陆续上线，先以卡片占位，不接真实功能）
+// ─── 板块数据（知识点卡片已上线，其余仍占位） ──────────
 const FEATURES = [
   {
     title: "错题本整理",
     desc: "拍照或粘贴错题，自动归类知识点与易错原因，生成专属错题集。",
+    live: false,
   },
   {
     title: "知识点卡片",
     desc: "把长篇笔记拆成可记忆的小卡片，支持间隔重复复习。",
+    live: true,
   },
   {
     title: "PDF 智能问答",
     desc: "上传课件 PDF，直接提问，基于原文给出带出处的答案。",
+    live: false,
   },
   {
     title: "单词背诵助手",
     desc: "按词频与考频生成背诵清单，配合测验巩固记忆。",
+    live: false,
   },
   {
     title: "试卷分析",
     desc: "上传试卷，定位薄弱章节并推荐针对性练习。",
+    live: false,
   },
   {
     title: "考试倒计时",
     desc: "设置考试日期，自动规划每日复习节奏与提醒。",
+    live: false,
   },
 ];
 
+type Mode = "outline" | "flashcard";
+
+interface Card {
+  question: string;
+  answer: string;
+  topic: string;
+}
+
 export default function Home() {
+  const [mode, setMode] = useState<Mode>("outline");
   const [text, setText] = useState("");
   const [outline, setOutline] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { isSignedIn } = useUser();
+
+  // 知识点卡片状态
+  const [cards, setCards] = useState<Card[]>([]);
+  const [flipped, setFlipped] = useState<Set<number>>(new Set());
 
   async function handleGenerate() {
     setError("");
@@ -94,22 +113,48 @@ export default function Home() {
       return;
     }
     setLoading(true);
-    setOutline("");
+    if (mode === "outline") setOutline("");
+    else setCards([]);
     try {
-      const res = await fetch("/api/generate", {
+      const endpoint =
+        mode === "outline" ? "/api/generate" : "/api/flashcards";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "生成失败，请稍后重试。");
+      if (!res.ok) throw new Error(data?.error || "生成失败，请稍后重试。");
+
+      if (mode === "outline") {
+        setOutline(data.outline || "");
+      } else {
+        setCards(data.cards || []);
       }
-      setOutline(data.outline || "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "生成失败，请稍后重试。");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function toggleFlip(i: number) {
+    setFlipped((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  // 切换模式时清空结果
+  function switchMode(m: Mode) {
+    if (m !== mode) {
+      setMode(m);
+      setOutline("");
+      setCards([]);
+      setFlipped(new Set());
+      setError("");
     }
   }
 
@@ -119,9 +164,9 @@ export default function Home() {
       <div className="h-1.5 w-full bg-gradient-to-r from-teal-500 via-teal-500 to-emerald-500" />
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
+        {/* ─── Header ─── */}
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            {/* 品牌标识 */}
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-sm">
               <svg
                 viewBox="0 0 24 24"
@@ -163,7 +208,31 @@ export default function Home() {
           </div>
         </header>
 
-        {/* 核心功能卡片 */}
+        {/* ─── 模式切换 Tab ─── */}
+        <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
+          <button
+            onClick={() => switchMode("outline")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "outline"
+                ? "bg-white text-teal-700 shadow-sm"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            📝 提纲生成
+          </button>
+          <button
+            onClick={() => switchMode("flashcard")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "flashcard"
+                ? "bg-white text-teal-700 shadow-sm"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            🎴 知识点卡片
+          </button>
+        </div>
+
+        {/* ─── 核心功能区（共用输入框） ─── */}
         <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
           <label htmlFor="source" className="text-sm font-medium text-stone-700">
             输入文本
@@ -172,7 +241,11 @@ export default function Home() {
             id="source"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="把课件或笔记内容粘贴到这里……"
+            placeholder={
+              mode === "outline"
+                ? "把课件或笔记内容粘贴到这里……"
+                : "粘贴要拆解成卡片的笔记内容……"
+            }
             className="h-48 w-full resize-y rounded-xl border border-stone-300 bg-white p-3 text-sm text-stone-900 shadow-sm outline-none transition-colors placeholder:text-stone-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
           />
           <button
@@ -180,7 +253,11 @@ export default function Home() {
             disabled={loading}
             className="self-start rounded-full bg-teal-700 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-teal-800 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "生成中…" : "生成提纲"}
+            {loading
+              ? "生成中…"
+              : mode === "outline"
+                ? "生成提纲"
+                : "生成卡片"}
           </button>
         </section>
 
@@ -190,7 +267,8 @@ export default function Home() {
           </div>
         )}
 
-        {outline && (
+        {/* ─── 提纲结果 ─── */}
+        {mode === "outline" && outline && (
           <section className="flex flex-col gap-2 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-medium text-stone-700">生成的提纲</h2>
@@ -207,7 +285,68 @@ export default function Home() {
           </section>
         )}
 
-        {/* 更多学习工具板块（陆续上线） */}
+        {/* ─── 卡片结果（翻转交互） ─── */}
+        {mode === "flashcard" && cards.length > 0 && (
+          <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-stone-700">
+                生成的知识卡片（{cards.length} 张）
+              </h2>
+              <span className="text-xs text-stone-400">点击卡片翻转查看答案</span>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {cards.map((card, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => toggleFlip(i)}
+                  className="group relative flex h-52 cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-stone-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-teal-300 hover:shadow-md"
+                  style={{ perspective: "800px" }}
+                >
+                  {/* 翻转动画容器 */}
+                  <div
+                    className={`absolute inset-0 flex flex-col transition-transform duration-400 ${
+                      flipped.has(i) ? "[transform:rotateY(180deg)]" : ""
+                    }`}
+                    style={{ transformStyle: "preserve-3d", backfaceVisibility: "hidden" }}
+                  >
+                    {/* 正面：问题 */}
+                    <div className="flex h-full flex-col justify-between">
+                      <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                        {card.topic}
+                      </span>
+                      <p className="text-base font-semibold leading-relaxed text-stone-900">
+                        {card.question}
+                      </p>
+                      <p className="text-xs text-stone-400">点击查看答案 ↓</p>
+                    </div>
+                  </div>
+                  {/* 背面：答案（用绝对定位覆盖正面） */}
+                  <div
+                    className={`absolute inset-0 flex flex-col justify-center rounded-xl bg-gradient-to-br from-teal-50 to-emerald-50 p-5 ${
+                      flipped.has(i) ? "" : "invisible"
+                    }`}
+                    style={{
+                      transform: "rotateY(180deg)",
+                      transformStyle: "preserve-3d",
+                      backfaceVisibility: "hidden",
+                    }}
+                  >
+                    <span className="mb-2 inline-block self-start rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-medium text-teal-800">
+                      {card.topic} · 答案
+                    </span>
+                    <p className="text-base leading-relaxed text-stone-800">
+                      {card.answer}
+                    </p>
+                    <p className="mt-3 text-xs text-stone-400">点击返回问题 ↑</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── 更多学习工具板块 ─── */}
         <section className="flex flex-col gap-4">
           <div>
             <h2 className="text-lg font-semibold text-stone-900">更多学习工具</h2>
@@ -235,8 +374,14 @@ export default function Home() {
                       {ICONS[f.title]}
                     </svg>
                   </div>
-                  <span className="shrink-0 rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">
-                    即将上线
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      f.live
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-teal-50 text-teal-700"
+                    }`}
+                  >
+                    {f.live ? "已上线" : "即将上线"}
                   </span>
                 </div>
                 <div>
