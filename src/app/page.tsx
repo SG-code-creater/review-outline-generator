@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SignInButton, useUser, useClerk } from "@clerk/nextjs";
+import { SignInButton, useUser } from "@clerk/nextjs";
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -94,20 +94,17 @@ interface Card {
   topic: string;
 }
 
-// ─── 自定义用户菜单（替代 UserButton，规避 EdgeOne 无 middleware 下登出客户端跳转卡死）───
+// ─── 自定义用户菜单（替代 UserButton，规避 EdgeOne 无 middleware 下登出问题）───
 function UserMenu() {
   const { user } = useUser();
-  const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
 
-  const handleSignOut = () => {
-    // 正常登出；无论结果如何，1.2s 后强制整页刷新到首页，
-    // 让会话 cookie 被重新读取、UI 状态复位（绕开客户端路由跳转卡死）。
-    signOut({ redirectUrl: "/" }).catch(() => {});
-    setTimeout(() => {
-      window.location.assign("/");
-    }, 1200);
-  };
+  // 直接跳转 Clerk 托管的 /sign-out 页面，
+  // 由 Clerk 服务端负责销毁 session + 清除 cookie + 跳回首页。
+  // 完全绕开客户端 signOut() API 调用（在 EdgeOne 下会返回 unexpected response）。
+  const clerkSignOutUrl =
+    "https://clerk.xuebox.me/sign-out?redirect_url=" +
+    encodeURIComponent("https://xuebox.me/");
 
   return (
     <div className="relative">
@@ -140,13 +137,12 @@ function UserMenu() {
           >
             管理账户
           </a>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="block w-full px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50"
+          <a
+            href={clerkSignOutUrl}
+            className="block px-4 py-2 text-left text-sm text-red-600 transition-colors hover:bg-stone-50"
           >
             退出登录
-          </button>
+          </a>
         </div>
       )}
     </div>
