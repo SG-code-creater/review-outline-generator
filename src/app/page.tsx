@@ -263,7 +263,7 @@ export default function Home() {
               <UserMenu />
             ) : (
               <a
-                href="https://clerk.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
+                href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
                 className="inline-block rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-800"
               >
                 登录
