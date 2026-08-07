@@ -29,6 +29,95 @@ function ViewSkeleton({ title }: { title: string }) {
   );
 }
 
+// ─── 仪表盘 Hero 辅助（问候 / 每日语录 / 演示曲线 / 座右铭） ───
+
+const QUOTES = [
+  "每一步都在靠近更好的自己。",
+  "今天的努力，是明天的底气。",
+  "把书读薄，把知识学厚。",
+  "慢一点也没关系，只要一直在走。",
+  "你背的每一个知识点，都在为未来铺路。",
+  "专注当下，结果会自己到来。",
+  "复习不是重复，而是让记忆生根。",
+  "你不需要很厉害才能开始，但开始了就会变厉害。",
+];
+
+// 时段问候（纯展示，按当前小时）
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 6) return { icon: "🌙", text: "夜深了" };
+  if (h < 12) return { icon: "☀️", text: "早上好" };
+  if (h < 14) return { icon: "🍃", text: "中午好" };
+  if (h < 18) return { icon: "🌤️", text: "下午好" };
+  if (h < 22) return { icon: "🌆", text: "晚上好" };
+  return { icon: "🌙", text: "夜深了" };
+}
+
+// 每日鼓励语（按日期伪随机，同一天固定）
+function getDailyQuote() {
+  const day = new Date().getDate();
+  return QUOTES[day % QUOTES.length];
+}
+
+// 生成 14 天演示曲线（后续接真实统计时替换为 DB 聚合）
+function makeCurve(seed: number, base: number, amp: number, trend: number) {
+  const arr: number[] = [];
+  let v = base;
+  for (let i = 0; i < 14; i++) {
+    v += Math.sin(i * 0.7 + seed) * amp * 0.5 + trend;
+    v = Math.max(0, v);
+    arr.push(Math.round(v));
+  }
+  return arr;
+}
+
+// 轻量折线图（SVG，含渐变填充 + 光点）
+function CurveChart({ wordsCurve, retentionCurve }: { wordsCurve: number[]; retentionCurve: number[] }) {
+  const W = 560, H = 150, pad = 8;
+  const len = Math.max(wordsCurve.length, retentionCurve.length);
+  const xStep = (W - pad * 2) / (len - 1);
+
+  const toPath = (data: number[], maxVal: number, scaleUp = false) => {
+    const max = Math.max(maxVal, 1);
+    return data
+      .map((d, i) => {
+        const x = pad + i * xStep;
+        const y = H - pad - (d / max) * (H - pad * 2) * (scaleUp ? 0.9 : 1);
+        return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  };
+
+  const wordsMax = Math.max(...wordsCurve, 10);
+  const retMax = 100;
+  const wordsPath = toPath(wordsCurve, wordsMax);
+  const retPath = toPath(retentionCurve, retMax);
+  const wordsArea = `${wordsPath} L${W - pad},${H - pad} L${pad},${H - pad} Z`;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: "auto" }} role="img" aria-label="学习趋势曲线">
+      <defs>
+        <linearGradient id="cgWords" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent-teal)" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="var(--accent-teal)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {/* 网格横线 */}
+      {[0.25, 0.5, 0.75].map((g) => (
+        <line key={g} x1={pad} x2={W - pad} y1={H * g} y2={H * g} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+      ))}
+      {/* 每日单词面积 + 折线 */}
+      <path d={wordsArea} fill="url(#cgWords)" />
+      <path d={wordsPath} fill="none" stroke="var(--accent-teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* 记忆保持率折线 */}
+      <path d={retPath} fill="none" stroke="var(--accent-purple)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="0" />
+      {/* 末端光点 */}
+      <circle cx={W - pad} cy={H - pad - (retentionCurve[len - 1] / retMax) * (H - pad * 2)} r="3.5" fill="var(--accent-purple)" />
+      <circle cx={W - pad} cy={H - pad - (wordsCurve[len - 1] / wordsMax) * (H - pad * 2) * 0.9} r="3.5" fill="var(--accent-teal)" />
+    </svg>
+  );
+}
+
 const QuizView = dynamic(() => import("@/components/QuizView"), {
   ssr: false,
   loading: () => <ViewSkeleton title="自测题" />,
@@ -223,7 +312,33 @@ export default function Home() {
   const [outline, setOutline] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // ─── 仪表盘 Hero 状态（问候 / 座右铭 / 曲线） ───
+  const [motto, setMotto] = useState("");
+  const [mottoDraft, setMottoDraft] = useState("");
+  const [editingMotto, setEditingMotto] = useState(false);
   const { isSignedIn } = useUser();
+  const { user } = useUser();
+
+  // ─── 仪表盘 Hero 派生值 ───
+  const greeting = getGreeting();
+  const dailyQuote = getDailyQuote();
+  const wordsCurve = makeCurve(1.2, 12, 10, 1.1); // 演示：每日学习单词
+  const retentionCurve = makeCurve(3.7, 55, 20, 2.2).map((v) => Math.min(100, Math.round(v))); // 演示：记忆保持率
+  const userFirstName = (user?.firstName as string) || (user?.username as string) || "";
+
+  // 座右铭持久化（localStorage，未登录时也能用）
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("xuebox_motto");
+      if (saved) setMotto(saved);
+    } catch {}
+  }, []);
+  function saveMotto() {
+    const v = mottoDraft.trim();
+    setMotto(v);
+    try { localStorage.setItem("xuebox_motto", v); } catch {}
+  }
 
   // 文件输入（PDF/图片 → 浏览器端抽取文本，复用现有生成管线）
   const fileRef = useRef<HTMLInputElement>(null);
@@ -852,10 +967,17 @@ export default function Home() {
 
   return (
     <>
-      {/* 微妙品牌顶线 */}
-      <div className="h-[2px] w-full opacity-40" style={{ background: 'linear-gradient(90deg, transparent, var(--accent-teal), var(--accent-purple), transparent)' }} />
+      {/* 浮动光晕层 — 给毛玻璃提供可折射的色彩内容 */}
+      <div className="aurora" aria-hidden>
+        <span className="o1" />
+        <span className="o2" />
+        <span className="o3" />
+      </div>
 
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
+      {/* 微妙品牌顶线 */}
+      <div className="h-[2px] w-full opacity-40 relative z-10" style={{ background: 'linear-gradient(90deg, transparent, var(--accent-teal), var(--accent-purple), transparent)' }} />
+
+      <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
         {/* ─── Header（暗色玻璃态） ─── */}
         <header className="flex items-start justify-between gap-4">
           <button
@@ -903,23 +1025,6 @@ export default function Home() {
             )}
           </div>
         </header>
-
-        {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
-        {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>备考场景</span>
-          {SCENARIOS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setScenario(s)}
-              className={scenario === s ? "glass-pill-active" : "glass-pill"}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        )}
 
         {/* ─── 核心功能区（共用输入框，仅提纲/卡片/自测题模式） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
@@ -973,6 +1078,20 @@ export default function Home() {
             }
             className="glass-input h-44 w-full resize-y p-4 text-sm leading-relaxed placeholder:text-sm"
           />
+          {/* 备考场景（折叠进输入卡，不占顶部仪表盘空间） */}
+          <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3.5">
+            <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>备考场景</span>
+            {SCENARIOS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setScenario(s)}
+                className={scenario === s ? "glass-pill-active" : "glass-pill"}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {extractMsg || (dragOver ? "松开即可提取文字" : "支持拖拽文件到此处")}
@@ -1187,6 +1306,61 @@ export default function Home() {
         />
         )}
 
+        {/* ─── 仪表盘 Hero（问候 + 座右铭 + 学习曲线，顶部专属） ─── */}
+        <section className="glass-card-deep flex flex-col gap-5 p-6 sm:p-7">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-2xl">{greeting.icon}</span>
+              <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {greeting.text}，{userFirstName || "同学"}
+              </h2>
+            </div>
+            {/* 可编辑座右铭 */}
+            <div className="group flex items-center gap-2">
+              {editingMotto ? (
+                <input
+                  autoFocus
+                  value={mottoDraft}
+                  onChange={(e) => setMottoDraft(e.target.value)}
+                  onBlur={() => { saveMotto(); setEditingMotto(false); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { saveMotto(); setEditingMotto(false); } }}
+                  className="glass-input w-full max-w-md px-3 py-1.5 text-sm"
+                  placeholder="写下你的座右铭…"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setMottoDraft(motto); setEditingMotto(true); }}
+                  className="text-left text-base italic transition-colors hover:text-[var(--text-primary)]"
+                  style={{ color: 'var(--text-secondary)' }}
+                  title="点击编辑座右铭"
+                >
+                  {motto || "写下一句属于你的座右铭，点击即可编辑"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 每日鼓励语 */}
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>💡 {dailyQuote}</p>
+
+          {/* 学习曲线卡片 */}
+          <div className="flex flex-col gap-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>学习趋势</h3>
+              <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--accent-teal)' }} /> 每日学习单词
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--accent-purple)' }} /> 记忆保持率
+                </span>
+              </div>
+            </div>
+            <CurveChart wordsCurve={wordsCurve} retentionCurve={retentionCurve} />
+          </div>
+        </section>
+
         {/* ─── 学习工具板块 ─── */}
         <section className="flex flex-col gap-4">
           <div>
@@ -1211,9 +1385,10 @@ export default function Home() {
                   key={f.title}
                   type="button"
                   onClick={() => handleFeatureClick(f)}
-                  className={`group flex flex-col gap-3 p-5 text-left transition-all duration-200 cursor-pointer ${
+                  className={`feature-card group flex flex-col gap-3 p-5 text-left transition-all duration-200 cursor-pointer ${
                     isActive ? 'glass-card-active' : 'glass-card hover:-translate-y-0.5'
                   }`}
+                  style={f.live ? ({ ['--ca' as string]: accentColor } as React.CSSProperties) : undefined}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl"
