@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       ease_factor,
       repetitions,
       due_at,
+      last_grade: q,
       last_reviewed: new Date().toISOString(),
     })
     .eq("id", id)

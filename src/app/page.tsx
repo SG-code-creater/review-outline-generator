@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
 
@@ -88,12 +88,24 @@ const FEATURES = [
 ];
 
 type Mode = "outline" | "flashcard" | "review";
+type ReviewView = "due" | "collection" | "outlines";
+type CardStatus = "all" | "new" | "weak" | "fuzzy" | "mastered";
 
 interface Card {
   id?: string;
   question: string;
   answer: string;
   topic: string;
+  last_grade?: number | null;
+  tags?: string[];
+}
+
+interface SavedOutline {
+  id: string;
+  title: string;
+  tags: string[];
+  result: { outline?: string } | string;
+  created_at: string;
 }
 
 // ─── 自定义用户菜单（替代 UserButton，规避 EdgeOne 无 middleware 下登出问题）───
@@ -182,6 +194,30 @@ export default function Home() {
   const [reviewRevealed, setReviewRevealed] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewMsg, setReviewMsg] = useState(""); // 完成提示
+
+  // 我的复习 → 子视图（今日复习 / 卡片题集 / 我的提纲）
+  const [reviewView, setReviewView] = useState<ReviewView>("due");
+
+  // 卡片题集（全部保存的卡片 + 状态/标签分组）
+  const [collectionCards, setCollectionCards] = useState<Card[]>([]);
+  const [collectionStatus, setCollectionStatus] = useState<CardStatus>("all");
+  const [collectionTag, setCollectionTag] = useState<string | null>(null);
+  const [collectionLoading, setCollectionLoading] = useState(false);
+  const [allTags, setAllTags] = useState<string[]>([]);
+
+  // 我的提纲（收藏的提纲）
+  const [outlines, setOutlines] = useState<SavedOutline[]>([]);
+  const [outlineViewId, setOutlineViewId] = useState<string | null>(null);
+  const [outlineLoading, setOutlineLoading] = useState(false);
+  const [saveOutlineState, setSaveOutlineState] = useState<SaveState>("idle");
+  const [outlineTitleInput, setOutlineTitleInput] = useState("");
+  const [outlineTagInput, setOutlineTagInput] = useState("");
+
+  // 评分防重复点击（乐观更新用）
+  const gradingRef = useRef(false);
+
+  // 题集内每张卡片的临时标签输入
+  const [tagDraft, setTagDraft] = useState<Record<string, string>>({});
 
   async function handleGenerate() {
     setError("");
@@ -296,11 +332,20 @@ export default function Home() {
     }
   }
 
-  // 复习评分（quality: 1忘记 / 3模糊 / 5记得）
+  // 复习评分（quality: 1忘记 / 3模糊 / 5记得）—— 乐观更新：立即切下一张，后台静默同步
   async function gradeCard(quality: number) {
     const card = reviewCards[reviewIndex];
     if (!card?.id) return;
-    setReviewLoading(true);
+    if (gradingRef.current) return; // 防重复点击（消除多点造成的跳题）
+    gradingRef.current = true;
+
+    // 1) 立即推进界面，不再等网络往返（约 2s 卡顿错觉的来源）
+    const next = reviewIndex + 1;
+    setReviewRevealed(false);
+    setReviewIndex(next);
+    if (next >= reviewCards.length) setReviewMsg("🎉 本轮复习完成！");
+
+    // 2) 后台同步评分，失败仅提示，不影响继续复习
     try {
       const res = await fetch("/api/cards/review", {
         method: "POST",
@@ -309,28 +354,138 @@ export default function Home() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || "更新失败");
+        setError(data?.error || "同步失败，已记录本次评分");
       }
-      const next = reviewIndex + 1;
-      if (next >= reviewCards.length) {
-        setReviewMsg("🎉 今天的复习完成啦！");
-      }
-      setReviewIndex(next);
-      setReviewRevealed(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "更新失败");
+    } catch {
+      setError("网络异常，评分将在下次复习时重试");
     } finally {
-      setReviewLoading(false);
+      gradingRef.current = false;
     }
   }
 
-  // 进入"我的复习"且已登录时，自动拉取待复习卡片
+  // 卡片题集：加载全部已保存卡片
+  async function loadCollection() {
+    setCollectionLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/cards?mode=all", { method: "GET" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "加载失败");
+      const list: Card[] = data.cards || [];
+      setCollectionCards(list);
+      const tagSet = new Set<string>();
+      list.forEach((c) => (c.tags || []).forEach((t) => tagSet.add(t)));
+      setAllTags(Array.from(tagSet));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setCollectionLoading(false);
+    }
+  }
+
+  // 我的提纲：加载收藏的提纲
+  async function loadOutlines() {
+    setOutlineLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/generations", { method: "GET" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "加载失败");
+      setOutlines(data.outlines || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setOutlineLoading(false);
+    }
+  }
+
+  // 题集内更新单卡标签
+  async function updateCardTags(id: string, tags: string[]) {
+    try {
+      await fetch("/api/cards", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, tags }),
+      });
+      setCollectionCards((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, tags } : c)),
+      );
+    } catch {
+      setError("标签更新失败");
+    }
+  }
+
+  // 题集内删除单卡
+  async function deleteCard(id: string) {
+    try {
+      const res = await fetch(`/api/cards?id=${id}`, { method: "DELETE" });
+      if (res.ok) setCollectionCards((prev) => prev.filter((c) => c.id !== id));
+      else setError("删除失败");
+    } catch {
+      setError("删除失败");
+    }
+  }
+
+  // 收藏当前提纲
+  async function saveOutline() {
+    if (!outline) return;
+    setSaveOutlineState("saving");
+    try {
+      const tags = outlineTagInput
+        .split(/[,，\s]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const res = await fetch("/api/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: outlineTitleInput.trim() || outline.split("\n")[0].slice(0, 30),
+          input_text: text,
+          result: { outline },
+          tags,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "保存失败");
+      setSaveOutlineState("saved");
+      setOutlineTitleInput("");
+      setOutlineTagInput("");
+    } catch (e) {
+      setSaveOutlineState("error");
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
+  }
+
+  // 删除提纲
+  async function deleteOutline(id: string) {
+    try {
+      const res = await fetch(`/api/generations?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setOutlines((prev) => prev.filter((o) => o.id !== id));
+        if (outlineViewId === id) setOutlineViewId(null);
+      } else setError("删除失败");
+    } catch {
+      setError("删除失败");
+    }
+  }
+
+  // 卡片状态徽标
+  function cardStatus(card: Card): { label: string; cls: string } {
+    if (card.last_grade == null) return { label: "未学", cls: "bg-stone-100 text-stone-600" };
+    if (card.last_grade <= 1) return { label: "薄弱", cls: "bg-red-100 text-red-700" };
+    if (card.last_grade === 3) return { label: "模糊", cls: "bg-amber-100 text-amber-700" };
+    return { label: "掌握", cls: "bg-emerald-100 text-emerald-700" };
+  }
+
+  // 进入"我的复习"且已登录时，按子视图拉取数据
   useEffect(() => {
     if (mode === "review" && isSignedIn) {
-      loadDueCards();
+      if (reviewView === "due") loadDueCards();
+      else if (reviewView === "collection") loadCollection();
+      else if (reviewView === "outlines") loadOutlines();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isSignedIn]);
+  }, [mode, isSignedIn, reviewView]);
 
   // 切换模式时清空结果
   function switchMode(m: Mode) {
@@ -510,6 +665,38 @@ export default function Home() {
             <pre className="whitespace-pre-wrap break-words rounded-xl border border-stone-100 bg-stone-50 p-4 text-sm leading-7 text-stone-800">
               {outline}
             </pre>
+            {/* 收藏提纲 */}
+            <div className="mt-2 flex flex-col gap-2 border-t border-stone-100 pt-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={outlineTitleInput}
+                  onChange={(e) => setOutlineTitleInput(e.target.value)}
+                  placeholder="提纲标题（可选）"
+                  className="w-40 rounded-lg border border-stone-300 px-2 py-1 text-xs outline-none focus:border-teal-500"
+                />
+                <input
+                  value={outlineTagInput}
+                  onChange={(e) => setOutlineTagInput(e.target.value)}
+                  placeholder="标签，逗号分隔（可选）"
+                  className="w-44 rounded-lg border border-stone-300 px-2 py-1 text-xs outline-none focus:border-teal-500"
+                />
+                {isSignedIn ? (
+                  saveOutlineState === "saved" ? (
+                    <span className="text-xs font-medium text-emerald-600">已收藏 ✓</span>
+                  ) : (
+                    <button
+                      onClick={saveOutline}
+                      disabled={saveOutlineState === "saving"}
+                      className="rounded-full bg-teal-700 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50"
+                    >
+                      {saveOutlineState === "saving" ? "收藏中…" : "保存到我的提纲"}
+                    </button>
+                  )
+                ) : (
+                  <span className="text-xs text-stone-400">登录后可收藏</span>
+                )}
+              </div>
+            </div>
           </section>
         )}
 
@@ -592,14 +779,16 @@ export default function Home() {
           </section>
         )}
 
-        {/* ─── 我的复习（间隔重复 SM-2） ─── */}
+        {/* ─── 我的复习（间隔重复 + 题集 + 提纲） ─── */}
         {mode === "review" && (
           <section className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
             <h2 className="text-sm font-medium text-stone-700">我的复习</h2>
 
             {!isSignedIn ? (
               <div className="flex flex-col items-center gap-3 py-8">
-                <p className="text-sm text-stone-500">登录后即可保存卡片并在此按间隔重复复习。</p>
+                <p className="text-sm text-stone-500">
+                  登录后即可保存卡片与提纲，并在此按间隔重复复习。
+                </p>
                 <a
                   href="https://accounts.xuebox.me/sign-in?redirect_url=https%3A%2F%2Fxuebox.me%2F"
                   className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
@@ -607,90 +796,368 @@ export default function Home() {
                   登录
                 </a>
               </div>
-            ) : reviewMsg ? (
-              <div className="py-10 text-center">
-                <p className="text-lg font-semibold text-stone-900">{reviewMsg}</p>
-                <button
-                  onClick={loadDueCards}
-                  className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                >
-                  再看一下
-                </button>
-              </div>
-            ) : reviewLoading && reviewCards.length === 0 ? (
-              <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
-            ) : reviewCards.length === 0 ? (
-              <div className="py-10 text-center">
-                <p className="text-sm text-stone-500">还没有待复习的卡片。</p>
-                <p className="mt-1 text-xs text-stone-400">
-                  去「知识点卡片」生成后点击「保存到我的卡片」即可在这里复习。
-                </p>
-              </div>
-            ) : reviewIndex >= reviewCards.length ? (
-              <div className="py-10 text-center">
-                <p className="text-lg font-semibold text-stone-900">🎉 本轮复习完成！</p>
-                <button
-                  onClick={loadDueCards}
-                  className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
-                >
-                  刷新待复习
-                </button>
-              </div>
             ) : (
-              (() => {
-                const card = reviewCards[reviewIndex];
-                const btn =
-                  "flex-1 rounded-lg py-2 text-sm font-medium transition-colors";
-                return (
-                  <div className="flex flex-col gap-4">
-                    <p className="text-xs text-stone-400">
-                      待复习 {reviewIndex + 1} / {reviewCards.length}
-                    </p>
-                    <div className="flex h-64 flex-col justify-between rounded-xl border border-stone-200 bg-white p-5">
-                      <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
-                        {card?.topic}
-                      </span>
-                      <p className="text-lg font-semibold leading-relaxed text-stone-900">
-                        {card?.question}
+              <>
+                {/* 子视图切换 */}
+                <div className="flex gap-1 rounded-lg bg-stone-100 p-1 w-fit">
+                  {([
+                    ["due", "今日复习"],
+                    ["collection", "卡片题集"],
+                    ["outlines", "我的提纲"],
+                  ] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setReviewView(v)}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        reviewView === v
+                          ? "bg-white text-teal-700 shadow-sm"
+                          : "text-stone-600 hover:text-stone-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ── 今日复习（SM-2 到期队列） ── */}
+                {reviewView === "due" &&
+                  (reviewMsg ? (
+                    <div className="py-10 text-center">
+                      <p className="text-lg font-semibold text-stone-900">{reviewMsg}</p>
+                      <button
+                        onClick={loadDueCards}
+                        className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                      >
+                        再看一下
+                      </button>
+                    </div>
+                  ) : reviewLoading && reviewCards.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+                  ) : reviewCards.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <p className="text-sm text-stone-500">还没有待复习的卡片。</p>
+                      <p className="mt-1 text-xs text-stone-400">
+                        去「知识点卡片」生成后点击「保存到我的卡片」即可在这里复习。
                       </p>
-                      {reviewRevealed ? (
-                        <div className="flex flex-col gap-3">
-                          <p className="border-t border-stone-100 pt-3 text-sm leading-relaxed text-stone-800">
-                            {card?.answer}
+                    </div>
+                  ) : reviewIndex >= reviewCards.length ? (
+                    <div className="py-10 text-center">
+                      <p className="text-lg font-semibold text-stone-900">🎉 本轮复习完成！</p>
+                      <button
+                        onClick={loadDueCards}
+                        className="mt-4 rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-800"
+                      >
+                        刷新待复习
+                      </button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const card = reviewCards[reviewIndex];
+                      const btn =
+                        "flex-1 rounded-lg py-2 text-sm font-medium transition-colors";
+                      return (
+                        <div className="flex flex-col gap-4">
+                          <p className="text-xs text-stone-400">
+                            待复习 {reviewIndex + 1} / {reviewCards.length}
                           </p>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => gradeCard(1)}
-                              className={`${btn} bg-red-50 text-red-600 hover:bg-red-100`}
-                            >
-                              忘记
-                            </button>
-                            <button
-                              onClick={() => gradeCard(3)}
-                              className={`${btn} bg-amber-50 text-amber-700 hover:bg-amber-100`}
-                            >
-                              模糊
-                            </button>
-                            <button
-                              onClick={() => gradeCard(5)}
-                              className={`${btn} bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
-                            >
-                              记得
-                            </button>
+                          <div className="flex h-64 flex-col justify-between rounded-xl border border-stone-200 bg-white p-5">
+                            <span className="inline-block self-start rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">
+                              {card?.topic}
+                            </span>
+                            <p className="text-lg font-semibold leading-relaxed text-stone-900">
+                              {card?.question}
+                            </p>
+                            {reviewRevealed ? (
+                              <div className="flex flex-col gap-3">
+                                <p className="border-t border-stone-100 pt-3 text-sm leading-relaxed text-stone-800">
+                                  {card?.answer}
+                                </p>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => gradeCard(1)}
+                                    className={`${btn} bg-red-50 text-red-600 hover:bg-red-100`}
+                                  >
+                                    忘记
+                                  </button>
+                                  <button
+                                    onClick={() => gradeCard(3)}
+                                    className={`${btn} bg-amber-50 text-amber-700 hover:bg-amber-100`}
+                                  >
+                                    模糊
+                                  </button>
+                                  <button
+                                    onClick={() => gradeCard(5)}
+                                    className={`${btn} bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
+                                  >
+                                    记得
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setReviewRevealed(true)}
+                                className="self-start rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-100"
+                              >
+                                显示答案
+                              </button>
+                            )}
                           </div>
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => setReviewRevealed(true)}
-                          className="self-start rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-700 hover:bg-teal-100"
-                        >
-                          显示答案
-                        </button>
-                      )}
+                      );
+                    })()
+                  ))}
+
+                {/* ── 卡片题集（全部保存的卡片 + 状态/标签分组） ── */}
+                {reviewView === "collection" &&
+                  (() => {
+                    const filtered = collectionCards.filter((c) => {
+                      if (collectionStatus !== "all") {
+                        const map: Record<string, string> = {
+                          new: "未学",
+                          weak: "薄弱",
+                          fuzzy: "模糊",
+                          mastered: "掌握",
+                        };
+                        if (cardStatus(c).label !== map[collectionStatus]) return false;
+                      }
+                      if (collectionTag && !(c.tags || []).includes(collectionTag))
+                        return false;
+                      return true;
+                    });
+                    const statusTabs: { v: CardStatus; label: string }[] = [
+                      { v: "all", label: "全部" },
+                      { v: "new", label: "未学" },
+                      { v: "weak", label: "薄弱" },
+                      { v: "fuzzy", label: "模糊" },
+                      { v: "mastered", label: "掌握" },
+                    ];
+                    return (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {statusTabs.map((t) => (
+                            <button
+                              key={t.v}
+                              onClick={() => {
+                                setCollectionStatus(t.v);
+                                setCollectionTag(null);
+                              }}
+                              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                                collectionStatus === t.v
+                                  ? "bg-teal-700 text-white shadow-sm"
+                                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                              }`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                          {allTags.length > 0 && (
+                            <span className="mx-1 text-xs text-stone-300">|</span>
+                          )}
+                          {allTags.map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setCollectionTag(t)}
+                              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                                collectionTag === t
+                                  ? "bg-teal-100 text-teal-700 ring-1 ring-teal-300"
+                                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                              }`}
+                            >
+                              #{t}
+                            </button>
+                          ))}
+                          {collectionTag && (
+                            <button
+                              onClick={() => setCollectionTag(null)}
+                              className="text-xs text-stone-400 underline hover:text-stone-600"
+                            >
+                              清除标签
+                            </button>
+                          )}
+                        </div>
+
+                        {collectionLoading && collectionCards.length === 0 ? (
+                          <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+                        ) : collectionCards.length === 0 ? (
+                          <div className="py-10 text-center">
+                            <p className="text-sm text-stone-500">还没有保存的卡片。</p>
+                            <p className="mt-1 text-xs text-stone-400">
+                              去「知识点卡片」生成后点击「保存到我的卡片」。
+                            </p>
+                          </div>
+                        ) : filtered.length === 0 ? (
+                          <p className="py-8 text-center text-sm text-stone-400">
+                            该筛选下没有卡片。
+                          </p>
+                        ) : (
+                          <div className="flex flex-col gap-3">
+                            <p className="text-xs text-stone-400">
+                              共 {filtered.length} 张
+                            </p>
+                            {filtered.map((c) => (
+                              <div
+                                key={c.id}
+                                className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">
+                                      {c.topic}
+                                    </span>
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${cardStatus(c).cls}`}
+                                    >
+                                      {cardStatus(c).label}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => deleteCard(c.id!)}
+                                    className="text-xs text-stone-400 hover:text-red-600"
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                                <p className="text-sm font-medium text-stone-900">
+                                  {c.question}
+                                </p>
+                                <p className="text-sm leading-relaxed text-stone-600">
+                                  {c.answer}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {(c.tags || []).map((t) => (
+                                    <span
+                                      key={t}
+                                      className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600"
+                                    >
+                                      #{t}
+                                      <button
+                                        onClick={() =>
+                                          updateCardTags(
+                                            c.id!,
+                                            (c.tags || []).filter((x) => x !== t),
+                                          )
+                                        }
+                                        className="text-stone-400 hover:text-red-600"
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  ))}
+                                  <input
+                                    value={tagDraft[c.id!] || ""}
+                                    onChange={(e) =>
+                                      setTagDraft((p) => ({
+                                        ...p,
+                                        [c.id!]: e.target.value,
+                                      }))
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        const v = e.currentTarget.value.trim();
+                                        if (v && !(c.tags || []).includes(v)) {
+                                          updateCardTags(c.id!, [
+                                            ...(c.tags || []),
+                                            v,
+                                          ]);
+                                        }
+                                        setTagDraft((p) => ({ ...p, [c.id!]: "" }));
+                                      }
+                                    }}
+                                    placeholder="加标签"
+                                    className="w-20 rounded-full border border-stone-200 px-2 py-0.5 text-xs outline-none focus:border-teal-500"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                {/* ── 我的提纲（收藏的提纲） ── */}
+                {reviewView === "outlines" &&
+                  (outlineLoading && outlines.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-stone-400">加载中…</p>
+                  ) : outlines.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <p className="text-sm text-stone-500">还没有收藏的提纲。</p>
+                      <p className="mt-1 text-xs text-stone-400">
+                        在「提纲生成」生成后点击「保存到我的提纲」即可沉淀到这里。
+                      </p>
                     </div>
-                  </div>
-                );
-              })()
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {outlines.map((o) => (
+                        <div
+                          key={o.id}
+                          className="flex flex-col gap-2 rounded-xl border border-stone-200 p-4"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-sm font-semibold text-stone-900">
+                              {o.title}
+                            </h3>
+                            <button
+                              onClick={() => deleteOutline(o.id)}
+                              className="text-xs text-stone-400 hover:text-red-600"
+                            >
+                              删除
+                            </button>
+                          </div>
+                          <p className="text-xs text-stone-400">
+                            {new Date(o.created_at).toLocaleDateString()}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {(o.tags || []).map((t) => (
+                              <span
+                                key={t}
+                                className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600"
+                              >
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                          {outlineViewId === o.id ? (
+                            <>
+                              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-stone-100 bg-stone-50 p-3 text-sm leading-7 text-stone-800">
+                                {typeof o.result === "string"
+                                  ? o.result
+                                  : o.result?.outline || ""}
+                              </pre>
+                              <button
+                                onClick={() => setOutlineViewId(null)}
+                                className="self-start text-xs text-stone-500 underline hover:text-stone-700"
+                              >
+                                收起
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setOutlineViewId(o.id)}
+                              className="self-start text-xs text-teal-700 underline hover:text-teal-800"
+                            >
+                              展开查看
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              downloadFile(
+                                `${o.title}.md`,
+                                typeof o.result === "string"
+                                  ? o.result
+                                  : o.result?.outline || "",
+                                "text/markdown",
+                              )
+                            }
+                            className="self-start text-xs text-stone-500 underline hover:text-stone-700"
+                          >
+                            下载 .md
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+              </>
             )}
           </section>
         )}

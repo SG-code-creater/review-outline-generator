@@ -23,6 +23,8 @@ create table if not exists public.generations (
   kind        text not null check (kind in ('outline', 'flashcard')),
   input_text  text not null,
   result      jsonb not null,
+  title       text,                              -- 提纲标题（取首行或用户填写），收藏提纲用
+  tags        text[] not null default '{}',      -- 用户自定义分类标签（收藏提纲/卡片）
   created_at  timestamptz not null default now()
 );
 create index if not exists generations_user_id_idx on public.generations(user_id);
@@ -42,6 +44,8 @@ create table if not exists public.cards (
   ease_factor   real not null default 2.5,             -- 难度系数（>=1.3）
   repetitions   integer not null default 0,            -- 连续答对次数
   last_reviewed timestamptz,                           -- 上次复习时间
+  last_grade    smallint,                              -- 最近一次评分(1忘记/3模糊/5记得)，用于题集分组
+  tags          text[] not null default '{}',          -- 用户自定义分类标签（题集）
   created_at    timestamptz not null default now()
 );
 create index if not exists cards_user_id_idx on public.cards(user_id);

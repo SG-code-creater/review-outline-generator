@@ -2,24 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase";
 import { getUserIdFromReq } from "@/lib/auth";
 
-// 保存 / 读取 / 更新用户的知识点卡片（支撑"我的复习"间隔重复 + 题集分组 + 标签）
+// 保存 / 读取用户收藏的提纲（kind='outline'，支撑"我的提纲"）
 export async function POST(req: NextRequest) {
   const userId = await getUserIdFromReq(req);
   if (!userId)
-    return NextResponse.json({ error: "请先登录后保存卡片。" }, { status: 401 });
+    return NextResponse.json({ error: "请先登录后保存提纲。" }, { status: 401 });
 
-  let cards: Array<{ question: string; answer: string; topic: string; tags?: string[] }> = [];
+  let title: string | undefined;
+  let input_text = "";
+  let result: unknown = null;
   let tags: string[] = [];
   try {
     const body = await req.json();
-    cards = Array.isArray(body?.cards) ? body.cards : [];
+    title = body?.title ? String(body.title).trim() : undefined;
+    input_text = typeof body?.input_text === "string" ? body.input_text : "";
+    result = body?.result ?? null;
     tags = Array.isArray(body?.tags) ? body.tags.map(String) : [];
   } catch {
     return NextResponse.json({ error: "请求格式错误。" }, { status: 400 });
   }
 
-  if (cards.length === 0)
-    return NextResponse.json({ error: "没有可保存的卡片。" }, { status: 400 });
+  if (!result)
+    return NextResponse.json({ error: "没有可保存的提纲内容。" }, { status: 400 });
 
   const supabase = getServerSupabase();
   if (!supabase)
@@ -30,27 +34,25 @@ export async function POST(req: NextRequest) {
     .from("profiles")
     .upsert({ user_id: userId, plan: "free" }, { onConflict: "user_id" });
 
-  const rows = cards
-    .filter((c) => c && c.question && c.answer)
-    .map((c) => ({
+  const { data, error } = await supabase
+    .from("generations")
+    .insert({
       user_id: userId,
-      topic: String(c.topic || "综合").trim(),
-      question: String(c.question).trim(),
-      answer: String(c.answer).trim(),
-      tags: Array.isArray(c.tags) ? c.tags.map(String) : tags,
-      due_at: new Date().toISOString(),
-    }));
+      kind: "outline",
+      title: title || "未命名提纲",
+      input_text,
+      result,
+      tags,
+    })
+    .select("id")
+    .single();
 
-  if (rows.length === 0)
-    return NextResponse.json({ error: "卡片内容无效。" }, { status: 400 });
-
-  const { error } = await supabase.from("cards").insert(rows);
   if (error) {
-    console.error("[cards] 保存失败:", error.message);
+    console.error("[generations] 保存失败:", error.message);
     return NextResponse.json({ error: "保存失败：" + error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ saved: rows.length });
+  return NextResponse.json({ saved: true, id: data?.id });
 }
 
 export async function GET(req: NextRequest) {
@@ -62,61 +64,58 @@ export async function GET(req: NextRequest) {
   if (!supabase)
     return NextResponse.json({ error: "数据库未配置。" }, { status: 500 });
 
-  const params = new URL(req.url).searchParams;
-  const mode = params.get("mode");
-  const status = params.get("status"); // new | weak | fuzzy | mastered
-  const tag = params.get("tag"); // 按标签筛选
-  const now = new Date().toISOString();
+  const tag = new URL(req.url).searchParams.get("tag");
 
-  let query = supabase.from("cards").select("*").eq("user_id", userId);
+  let query = supabase
+    .from("generations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("kind", "outline")
+    .order("created_at", { ascending: false })
+    .limit(200);
 
-  if (mode === "due") {
-    query = query.lte("due_at", now).order("due_at", { ascending: true });
-  } else {
-    // 题集：全部卡片（按创建时间倒序）
-    query = query.order("created_at", { ascending: false }).limit(300);
-    if (status === "new") query = query.is("last_grade", null);
-    else if (status === "weak") query = query.eq("last_grade", 1);
-    else if (status === "fuzzy") query = query.eq("last_grade", 3);
-    else if (status === "mastered") query = query.eq("last_grade", 5);
-    if (tag) query = query.contains("tags", [tag]);
-  }
+  if (tag) query = query.contains("tags", [tag]);
 
   const { data, error } = await query;
   if (error) {
-    console.error("[cards] 读取失败:", error.message);
+    console.error("[generations] 读取失败:", error.message);
     return NextResponse.json({ error: "读取失败：" + error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ cards: data || [] });
+  return NextResponse.json({ outlines: data || [] });
 }
 
-// 更新单卡标签（题集内打标签 / 去标签）
+// 更新提纲标签 / 标题
 export async function PATCH(req: NextRequest) {
   const userId = await getUserIdFromReq(req);
   if (!userId)
     return NextResponse.json({ error: "请先登录。" }, { status: 401 });
 
   let id: string | undefined;
+  let title: string | undefined;
   let tags: string[] | undefined;
   try {
     const body = await req.json();
     id = body?.id;
+    title = body?.title ? String(body.title).trim() : undefined;
     tags = Array.isArray(body?.tags) ? body.tags.map(String) : undefined;
   } catch {
     return NextResponse.json({ error: "请求格式错误。" }, { status: 400 });
   }
 
-  if (!id || tags == null)
-    return NextResponse.json({ error: "缺少参数。" }, { status: 400 });
+  if (!id) return NextResponse.json({ error: "缺少参数。" }, { status: 400 });
 
   const supabase = getServerSupabase();
   if (!supabase)
     return NextResponse.json({ error: "数据库未配置。" }, { status: 500 });
 
+  const patch: { title?: string; tags?: string[] } = {};
+  if (title) patch.title = title;
+  if (tags != null) patch.tags = tags;
+
   const { error } = await supabase
-    .from("cards")
-    .update({ tags })
+    .from("generations")
+    .update(patch)
     .eq("id", id)
     .eq("user_id", userId);
 
@@ -124,10 +123,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "更新失败：" + error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, tags });
+  return NextResponse.json({ ok: true });
 }
 
-// 删除单卡（题集管理）
+// 删除提纲
 export async function DELETE(req: NextRequest) {
   const userId = await getUserIdFromReq(req);
   if (!userId)
@@ -141,7 +140,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "数据库未配置。" }, { status: 500 });
 
   const { error } = await supabase
-    .from("cards")
+    .from("generations")
     .delete()
     .eq("id", id)
     .eq("user_id", userId);
