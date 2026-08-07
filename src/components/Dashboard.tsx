@@ -266,29 +266,79 @@ function WeatherWidget() {
 }
 
 function TasksWidget() {
-  const [tasks, setTasks] = useState<{ id: number; text: string; done: boolean }[]>([]);
-  const [input, setInput] = useState("");
   const today = new Date().toISOString().slice(0, 10);
+  const [tasks, setTasks] = useState<{ id: string; text: string; done: boolean }[]>([]);
+  const [input, setInput] = useState("");
+  const [offline, setOffline] = useState(true);
 
+  // 加载：登录→拉后端；未登录→本地
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("xuebox_tasks_" + today);
-      if (raw) setTasks(JSON.parse(raw));
-    } catch {}
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/tasks?date=${today}`);
+        if (r.status === 401) {
+          const raw = localStorage.getItem("xuebox_tasks_" + today);
+          if (alive) { setTasks(raw ? JSON.parse(raw) : []); setOffline(true); }
+        } else if (r.ok) {
+          const j = await r.json();
+          if (alive) { setTasks(j.tasks || []); setOffline(false); }
+        } else if (alive) setOffline(true);
+      } catch {
+        if (alive) setOffline(true);
+      }
+    })();
+    return () => { alive = false; };
   }, [today]);
-  useEffect(() => {
-    try { localStorage.setItem("xuebox_tasks_" + today, JSON.stringify(tasks)); } catch {}
-  }, [tasks, today]);
 
-  const add = () => {
+  // 离线时本地持久化
+  useEffect(() => {
+    if (offline) {
+      try { localStorage.setItem("xuebox_tasks_" + today, JSON.stringify(tasks)); } catch {}
+    }
+  }, [tasks, offline, today]);
+
+  const add = async () => {
     const t = input.trim();
     if (!t) return;
-    setTasks((p) => [...p, { id: Date.now(), text: t, done: false }]);
+    if (offline) {
+      setTasks((p) => [...p, { id: String(Date.now()), text: t, done: false }]);
+      setInput("");
+      return;
+    }
     setInput("");
+    try {
+      const r = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: today, text: t }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        if (j.task) { setTasks((p) => [...p, { id: j.task.id, text: j.task.text, done: false }]); return; }
+      }
+    } catch {}
+    setTasks((p) => [...p, { id: String(Date.now()), text: t, done: false }]);
+  };
+
+  const toggle = async (id: string) => {
+    const cur = tasks.find((t) => t.id === id);
+    if (!cur) return;
+    const next = !cur.done;
+    setTasks((p) => p.map((t) => (t.id === id ? { ...t, done: next } : t)));
+    if (!offline) {
+      try {
+        await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, done: next }),
+        });
+      } catch {}
+    }
   };
 
   return (
-    <WidgetShell title="今日任务" icon="✅">
+    <WidgetShell title="今日任务" icon="✅" badge={!offline ? <span className="glass-badge glass-badge-live">已同步</span> : undefined}>
       <div className="flex gap-2">
         <input
           value={input}
@@ -306,7 +356,7 @@ function TasksWidget() {
             <input
               type="checkbox"
               checked={t.done}
-              onChange={() => setTasks((p) => p.map((x) => x.id === t.id ? { ...x, done: !x.done } : x))}
+              onChange={() => toggle(t.id)}
               className="accent-[var(--accent-teal)]"
             />
             <span className={t.done ? "line-through" : ""}>{t.text}</span>
@@ -609,6 +659,27 @@ function resolve(item: LayoutItem, others: LayoutItem[]): LayoutItem {
   return { ...item, y };
 }
 
+// 计算与其他卡片边缘对齐的参考线（px）。网格本身已做吸附，这里负责"对齐参考线"的可视化。
+function computeGuides(moved: LayoutItem, others: LayoutItem[], cw: number) {
+  const v: number[] = [];
+  const h: number[] = [];
+  const leftX = (x: number) => x * (cw + GAP);
+  const rightX = (x: number, w: number) => (x + w) * (cw + GAP) - GAP;
+  const centerX = (x: number, w: number) => x * (cw + GAP) + (w * cw + GAP * (w - 1)) / 2;
+  const topY = (y: number) => y * (ROW_H + GAP);
+  const botY = (y: number, hgt: number) => (y + hgt) * (ROW_H + GAP) - GAP;
+  const midY = (y: number, hgt: number) => y * (ROW_H + GAP) + (hgt * ROW_H + GAP * (hgt - 1)) / 2;
+  for (const o of others) {
+    if (moved.x === o.x) v.push(leftX(o.x));
+    if (moved.x + moved.w === o.x + o.w) v.push(rightX(moved.x, moved.w));
+    if (Math.round(centerX(moved.x, moved.w)) === Math.round(centerX(o.x, o.w))) v.push(centerX(moved.x, moved.w));
+    if (moved.y === o.y) h.push(topY(o.y));
+    if (moved.y + moved.h === o.y + o.h) h.push(botY(moved.y, moved.h));
+    if (Math.round(midY(moved.y, moved.h)) === Math.round(midY(o.y, o.h))) h.push(midY(moved.y, moved.h));
+  }
+  return { v: [...new Set(v)], h: [...new Set(h)] };
+}
+
 function DashboardGrid({
   layout,
   setLayout,
@@ -624,6 +695,7 @@ function DashboardGrid({
   const [width, setWidth] = useState(0);
   const [preview, setPreview] = useState<LayoutItem[] | null>(null);
   const [dragId, setDragId] = useState<WidgetKey | null>(null);
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
 
   const dragRef = useRef<{ id: WidgetKey; sx: number; sy: number; orig: LayoutItem } | null>(null);
   const previewRef = useRef<LayoutItem[] | null>(null);
@@ -652,6 +724,7 @@ function DashboardGrid({
     if (previewRef.current) setLayout(previewRef.current);
     previewRef.current = null;
     setPreview(null);
+    setGuides({ v: [], h: [] });
     setDragId(null);
     dragRef.current = null;
   }, [setLayout]);
@@ -669,6 +742,7 @@ function DashboardGrid({
     const next = layoutRef.current.map((l) => (l.i === d.id ? moved : l));
     previewRef.current = next;
     setPreview(next);
+    setGuides(computeGuides(moved, layoutRef.current.filter((l) => l.i !== d.id), cw));
   }, []);
 
   const onUp = useCallback(() => {
@@ -690,6 +764,7 @@ function DashboardGrid({
     const next = layoutRef.current.map((l) => (l.i === d.id ? resized : l));
     previewRef.current = next;
     setPreview(next);
+    setGuides(computeGuides(resized, layoutRef.current.filter((l) => l.i !== d.id), cw));
   }, []);
 
   const onResizeUp = useCallback(() => {
@@ -760,6 +835,13 @@ function DashboardGrid({
           </div>
         );
       })}
+      {/* 对齐参考线：拖动/缩放时与其他卡片边缘对齐时显示（网格本身已吸附） */}
+      {editing && dragId && guides.v.map((x, i) => (
+        <div key={"gv" + i} className="pointer-events-none absolute z-10" style={{ left: x, top: 0, height: containerH, width: 2, background: "var(--accent-teal)", opacity: 0.55 }} />
+      ))}
+      {editing && dragId && guides.h.map((y, i) => (
+        <div key={"gh" + i} className="pointer-events-none absolute z-10" style={{ top: y, left: 0, width: "100%", height: 2, background: "var(--accent-teal)", opacity: 0.55 }} />
+      ))}
     </div>
   );
 }
