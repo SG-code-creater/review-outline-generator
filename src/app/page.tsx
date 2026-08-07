@@ -928,6 +928,7 @@ export default function Home() {
         </div>
 
         {/* ─── 垂直场景选择（考研/考公/教资/期末，改 prompt 拉开定位） ─── */}
+        {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-stone-400">备考场景：</span>
           {SCENARIOS.map((s) => (
@@ -945,9 +946,10 @@ export default function Home() {
             </button>
           ))}
         </div>
+        )}
 
-        {/* ─── 核心功能区（共用输入框，仅提纲/卡片模式） ─── */}
-        {mode !== "review" && (
+        {/* ─── 核心功能区（共用输入框，仅提纲/卡片/自测题模式） ─── */}
+        {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
         <section
           onDragOver={(e) => {
             e.preventDefault();
