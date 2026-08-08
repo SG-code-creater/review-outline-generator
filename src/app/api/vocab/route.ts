@@ -9,11 +9,13 @@ export const dynamic = "force-dynamic";
 
 // 把一条词转换成 cards 表行（topic 用于区分词书，tags 含 'vocab' 便于筛选）
 function toRows(
+  userId: string,
   topic: string,
   tag: string,
   entries: Array<{ question: string; answer: string }>,
 ) {
   return entries.map((e) => ({
+    user_id: userId,
     topic,
     tags: ["vocab", tag],
     question: e.question.trim(),
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
     topic = book.name;
     tag = book.key;
     rows = toRows(
+      userId,
       book.name,
       book.key,
       book.words.map((w) => ({
@@ -65,6 +68,7 @@ export async function POST(req: NextRequest) {
     topic = "我的词表";
     tag = "custom";
     rows = toRows(
+      userId,
       topic,
       tag,
       body.words
