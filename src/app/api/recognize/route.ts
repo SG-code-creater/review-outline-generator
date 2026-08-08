@@ -12,7 +12,7 @@ import { getUserIdFromReq } from "@/lib/auth";
 const MIMO_BASE_URL =
   process.env.MIMO_BASE_URL || "https://token-plan-cn.xiaomimimo.com/v1";
 const MIMO_MODEL = process.env.MIMO_MODEL || "mimo-v2.5";
-const MIMO_AUTH_HEADER = "api-key"; // 官方多模态接口示例使用此头；如用 OpenAI SDK 风格可改 "Authorization"
+const MIMO_AUTH_HEADER = "api-key"; // MiMo 多模态接口用此头；若返回 401 可改为 "Authorization"
 
 const MAX_IMAGES = 8;
 const MAX_IMG_LEN = 10 * 1024 * 1024; // base64 长度上限，约 < 7.5MB 原图

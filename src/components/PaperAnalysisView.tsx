@@ -152,35 +152,46 @@ export default function PaperAnalysisView({
     setRecognizing(true);
     try {
       const pdfjs: any = await import("pdfjs-dist");
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      // 用固定 CDN 版本避免版本不匹配导致 _renderPageChunk 崩溃
+      pdfjs.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
       const buf = await file.arrayBuffer();
-      const doc = await pdfjs.getDocument({ data: buf }).promise;
+      const loadingTask = pdfjs.getDocument({ data: buf, useSystemFonts: true });
+      const doc = await loadingTask.promise;
       let extracted = "";
       const pageImages: string[] = [];
       const pageCount = Math.min(doc.numPages, MAX_IMAGES);
+
       for (let n = 1; n <= pageCount; n++) {
-        const page = await doc.getPage(n);
-        // 数字 PDF：直接提文字
-        const tc = await page.getTextContent();
-        const pageText = (tc.items as any[])
-          .map((it) => ("str" in it ? it.str : ""))
-          .join(" ");
-        if (pageText.trim().length > 30) {
-          extracted += `\n--- 第 ${n} 页 ---\n${pageText}\n`;
-        } else {
-          // 扫描版：渲染成图，交给 MiMo 视觉识别（能忽略手写/批改）
-          const base = page.getViewport({ scale: 1 });
-          const scale = Math.min(2, 1600 / Math.max(base.width, base.height));
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) continue;
-          await page.render({ canvas, viewport } as any).promise;
-          pageImages.push(canvas.toDataURL("image/jpeg", 0.85));
+        try {
+          const page = await doc.getPage(n);
+          // 数字 PDF：直接提文字
+          const tc = await page.getTextContent();
+          const items = tc?.items;
+          const pageText = Array.isArray(items)
+            ? items.map((it: any) => (it?.str || "")).join(" ")
+            : "";
+          if (pageText.trim().length > 30) {
+            extracted += `\n--- 第 ${n} 页 ---\n${pageText}\n`;
+          } else {
+            // 扫描版：渲染成图，交给 MiMo 视觉识别（能忽略手写/批改）
+            const base = page.getViewport({ scale: 1 });
+            const scale = Math.min(2, 1600 / Math.max(base.width, base.height));
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.round(viewport.width);
+            canvas.height = Math.round(viewport.height);
+            const ctx = canvas.getContext("2d");
+            if (!ctx) continue;
+            await page.render({ canvasContext: ctx, viewport } as any).promise;
+            pageImages.push(canvas.toDataURL("image/jpeg", 0.85));
+          }
+        } catch (pageErr) {
+          // 单页失败不影响其他页
+          console.warn(`PDF 第 ${n} 页处理失败:`, pageErr);
         }
       }
+
       if (extracted.trim().length > 40) {
         setText((prev) => (prev ? prev + "\n\n" : "") + extracted.trim());
         setSource("pdf");
@@ -192,7 +203,10 @@ export default function PaperAnalysisView({
         setErr("未能从 PDF 提取到内容，请确认文件有效或换一份。");
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "PDF 解析失败");
+      // pdfjs 加载/解析整体失败 → 降级提示用户用图片上传
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("PDF 处理失败:", msg);
+      setErr(`PDF 解析失败（${msg.slice(0, 80)}）。建议改用「拍照」或「相册」上传图片来识别。`);
     } finally {
       setRecognizing(false);
     }
