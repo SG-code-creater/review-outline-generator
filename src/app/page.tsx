@@ -49,6 +49,10 @@ const VocabView = dynamic(() => import("@/components/VocabView"), {
   ssr: false,
   loading: () => <ViewSkeleton title="单词背诵" />,
 });
+const PaperAnalysisView = dynamic(() => import("@/components/PaperAnalysisView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="试卷分析" />,
+});
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -153,7 +157,8 @@ const FEATURES = [
   {
     title: "试卷分析",
     desc: "上传试卷，定位薄弱章节并推荐针对性练习。",
-    live: false,
+    live: true,
+    mode: "paper" as Mode,
   },
   {
     title: "考试倒计时",
@@ -933,6 +938,7 @@ export default function Home() {
             { key: "review" as Mode, label: "我的复习", icon: "🔄" },
             { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
             { key: "vocab" as Mode, label: "单词背诵", icon: "📚" },
+            { key: "paper" as Mode, label: "试卷分析", icon: "📊" },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -1236,6 +1242,10 @@ export default function Home() {
 
         {mode === "vocab" && (
           <VocabView isSignedIn={isSignedIn} />
+        )}
+
+        {mode === "paper" && (
+          <PaperAnalysisView isSignedIn={isSignedIn} />
         )}
 
         {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}

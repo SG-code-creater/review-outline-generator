@@ -47,15 +47,37 @@ export async function POST(req: NextRequest) {
 
   let text = "";
   let scenario: string | undefined;
+  // 预结构化题目（试卷分析导入）：直接写入，跳过 DeepSeek 识别
+  let items: (MistakeItem & { knowledgePoint?: string })[] | null = null;
   try {
     const body = await req.json();
     text = typeof body?.text === "string" ? body.text : "";
     scenario = typeof body?.scenario === "string" ? body.scenario : undefined;
+    if (Array.isArray(body?.items) && body.items.length) {
+      items = (body.items as unknown[])
+        .filter((it): it is Record<string, unknown> => !!it && typeof it === "object")
+        .map((it) => {
+          const options = Array.isArray(it.options)
+            ? (it.options as unknown[]).map((o) => String(o))
+            : [];
+          let answer = typeof it.answer === "number" ? it.answer : 0;
+          if (answer < 0 || answer >= options.length) answer = 0;
+          return {
+            question: String(it.question ?? ""),
+            options,
+            answer,
+            explanation: String(it.explanation ?? ""),
+            evidence: it.evidence ? String(it.evidence) : undefined,
+            knowledgePoint: it.knowledgePoint ? String(it.knowledgePoint) : undefined,
+          };
+        })
+        .filter((q) => q.question && q.options.length >= 2);
+    }
   } catch {
     return NextResponse.json({ error: "请求格式错误。" }, { status: 400 });
   }
 
-  if (!text.trim()) {
+  if (!items && !text.trim()) {
     return NextResponse.json({ error: "文本不能为空。" }, { status: 400 });
   }
 
@@ -72,48 +94,57 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 调用 DeepSeek 从文本中识别题目
-    const resp = await fetch(DEEPSEEK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [
-          {
-            role: "system",
-            content:
-              SYSTEM_PROMPT +
-              scenarioGuidance(scenario) +
-              "\n尽可能多地识别出文本中的题目。",
-          },
-          { role: "user", content: text },
-        ],
-        temperature: 0.3,
-        max_tokens: 3200,
-        response_format: { type: "json_object" },
-      }),
-    });
+    // 路径分支：若前端传了预结构化题目（试卷分析导入），直接写入；
+    // 否则从文本调用 DeepSeek 识别题目。
+    const scenarioLabel = scenario && scenario !== "通用" ? scenario : "";
+    let toImport: (MistakeItem & { knowledgePoint?: string })[];
 
-    if (!resp.ok) {
-      const detail = await resp.text();
-      return NextResponse.json(
-        { error: `DeepSeek 调用失败（${resp.status}）：${detail.slice(0, 200)}` },
-        { status: 502 },
-      );
-    }
+    if (items && items.length) {
+      toImport = items;
+    } else {
+      const resp = await fetch(DEEPSEEK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: [
+            {
+              role: "system",
+              content:
+                SYSTEM_PROMPT +
+                scenarioGuidance(scenario) +
+                "\n尽可能多地识别出文本中的题目。",
+            },
+            { role: "user", content: text },
+          ],
+          temperature: 0.3,
+          max_tokens: 3200,
+          response_format: { type: "json_object" },
+        }),
+      });
 
-    const data = await resp.json();
-    const raw = data?.choices?.[0]?.message?.content?.trim() || "";
-    const items = parseMistakes(raw);
+      if (!resp.ok) {
+        const detail = await resp.text();
+        return NextResponse.json(
+          { error: `DeepSeek 调用失败（${resp.status}）：${detail.slice(0, 200)}` },
+          { status: 502 },
+        );
+      }
 
-    if (!items || items.length === 0) {
-      return NextResponse.json(
-        { error: "未能从文本中识别出有效题目，请确认内容清晰或换一份再试。" },
-        { status: 502 },
-      );
+      const data = await resp.json();
+      const raw = data?.choices?.[0]?.message?.content?.trim() || "";
+      const parsed = parseMistakes(raw);
+
+      if (!parsed || parsed.length === 0) {
+        return NextResponse.json(
+          { error: "未能从文本中识别出有效题目，请确认内容清晰或换一份再试。" },
+          { status: 502 },
+        );
+      }
+      toImport = parsed;
     }
 
     // 批量写入 mistakes 表（origin='upload'）
@@ -122,7 +153,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "服务端数据库未配置。" }, { status: 500 });
     }
 
-    const rows = items.map((item) => ({
+    const rows = toImport.map((item) => ({
       user_id: userId,
       origin: "upload",
       question: item.question,
@@ -131,10 +162,11 @@ export async function POST(req: NextRequest) {
       picked: null,
       explanation: item.explanation || null,
       evidence: item.evidence || null,
-      source_text: text,
-      source_title:
-        scenario && scenario !== "通用"
-          ? `${scenario} - 上传错题`
+      source_text: items && items.length ? item.question : text,
+      source_title: item.knowledgePoint
+        ? `${scenarioLabel ? scenarioLabel + "·" : ""}${item.knowledgePoint}`
+        : scenarioLabel
+          ? `${scenarioLabel} - 上传错题`
           : text.slice(0, 50) + (text.length > 50 ? "…" : ""),
     }));
 
@@ -148,15 +180,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 记录使用量（异步，不阻塞）
-    void recordUsage(text.length, null, userId);
+    void recordUsage(items && items.length ? items.length : text.length, null, userId);
 
     return NextResponse.json({
       ok: true,
       count: rows.length,
-      mistakes: rows.map((r, i) => ({
+      mistakes: rows.map((r) => ({
         id: "", // insert 不返回 id，前端 reload 即可
         ...r,
-        ...items[i],
       })),
     });
   } catch {
