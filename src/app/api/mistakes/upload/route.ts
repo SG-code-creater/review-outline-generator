@@ -47,37 +47,15 @@ export async function POST(req: NextRequest) {
 
   let text = "";
   let scenario: string | undefined;
-  // 预结构化题目（试卷分析导入）：直接写入，跳过 DeepSeek 识别
-  let items: (MistakeItem & { knowledgePoint?: string })[] | null = null;
   try {
     const body = await req.json();
     text = typeof body?.text === "string" ? body.text : "";
     scenario = typeof body?.scenario === "string" ? body.scenario : undefined;
-    if (Array.isArray(body?.items) && body.items.length) {
-      items = (body.items as unknown[])
-        .filter((it): it is Record<string, unknown> => !!it && typeof it === "object")
-        .map((it) => {
-          const options = Array.isArray(it.options)
-            ? (it.options as unknown[]).map((o) => String(o))
-            : [];
-          let answer = typeof it.answer === "number" ? it.answer : 0;
-          if (answer < 0 || answer >= options.length) answer = 0;
-          return {
-            question: String(it.question ?? ""),
-            options,
-            answer,
-            explanation: String(it.explanation ?? ""),
-            evidence: it.evidence ? String(it.evidence) : undefined,
-            knowledgePoint: it.knowledgePoint ? String(it.knowledgePoint) : undefined,
-          };
-        })
-        .filter((q) => q.question && q.options.length >= 2);
-    }
   } catch {
     return NextResponse.json({ error: "请求格式错误。" }, { status: 400 });
   }
 
-  if (!items && !text.trim()) {
+  if (!text.trim()) {
     return NextResponse.json({ error: "文本不能为空。" }, { status: 400 });
   }
 
@@ -94,15 +72,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 路径分支：若前端传了预结构化题目（试卷分析导入），直接写入；
-    // 否则从文本调用 DeepSeek 识别题目。
+    // 从文本调用 DeepSeek 识别题目
     const scenarioLabel = scenario && scenario !== "通用" ? scenario : "";
-    let toImport: (MistakeItem & { knowledgePoint?: string })[];
+    let toImport: MistakeItem[];
 
-    if (items && items.length) {
-      toImport = items;
-    } else {
-      const resp = await fetch(DEEPSEEK_URL, {
+    const resp = await fetch(DEEPSEEK_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -145,7 +119,6 @@ export async function POST(req: NextRequest) {
         );
       }
       toImport = parsed;
-    }
 
     // 批量写入 mistakes 表（origin='upload'）
     const supabase = getServerSupabase();
@@ -162,12 +135,10 @@ export async function POST(req: NextRequest) {
       picked: null,
       explanation: item.explanation || null,
       evidence: item.evidence || null,
-      source_text: items && items.length ? item.question : text,
-      source_title: item.knowledgePoint
-        ? `${scenarioLabel ? scenarioLabel + "·" : ""}${item.knowledgePoint}`
-        : scenarioLabel
-          ? `${scenarioLabel} - 上传错题`
-          : text.slice(0, 50) + (text.length > 50 ? "…" : ""),
+      source_text: text,
+      source_title: scenarioLabel
+        ? `${scenarioLabel} - 上传错题`
+        : text.slice(0, 50) + (text.length > 50 ? "…" : ""),
     }));
 
     const { error } = await supabase.from("mistakes").insert(rows);
@@ -180,7 +151,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 记录使用量（异步，不阻塞）
-    void recordUsage(items && items.length ? items.length : text.length, null, userId);
+    void recordUsage(text.length, null, userId);
 
     return NextResponse.json({
       ok: true,
