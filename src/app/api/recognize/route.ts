@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         { role: "user", content },
       ],
       temperature: 0.2,
-      max_tokens: 8000,
+      max_tokens: 4096,
       stream: true, // 流式：避免网关超时
     });
 
