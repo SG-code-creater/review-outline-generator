@@ -49,6 +49,10 @@ const VocabView = dynamic(() => import("@/components/VocabView"), {
   ssr: false,
   loading: () => <ViewSkeleton title="单词背诵" />,
 });
+const ExamsView = dynamic(() => import("@/components/ExamsView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="考试倒计时" />,
+});
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -143,8 +147,9 @@ const FEATURES = [
   },
   {
     title: "考试倒计时",
-    desc: "设置考试日期，自动规划每日复习节奏与提醒。",
-    live: false,
+    desc: "添加考试日期，实时倒计时，多考试并行管理，随时掌握备考节奏。",
+    live: true,
+    mode: "exam" as Mode,
   },
 ];
 
@@ -919,6 +924,7 @@ export default function Home() {
             { key: "review" as Mode, label: "我的复习", icon: "🔄" },
             { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
             { key: "vocab" as Mode, label: "单词背诵", icon: "📚" },
+            { key: "exam" as Mode, label: "考试倒计时", icon: "⏰" },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -1222,6 +1228,10 @@ export default function Home() {
 
         {mode === "vocab" && (
           <VocabView isSignedIn={isSignedIn} />
+        )}
+
+        {mode === "exam" && (
+          <ExamsView isSignedIn={isSignedIn} />
         )}
 
         {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}
