@@ -12,7 +12,6 @@ import { getUserIdFromReq } from "@/lib/auth";
 const MIMO_BASE_URL =
   process.env.MIMO_BASE_URL || "https://token-plan-cn.xiaomimimo.com/v1";
 const MIMO_MODEL = process.env.MIMO_MODEL || "mimo-v2.5";
-const MIMO_AUTH_HEADER = "api-key"; // MiMo 多模态接口用此头；若返回 401 可改为 "Authorization"
 
 const MAX_IMAGES = 8;
 const MAX_IMG_LEN = 10 * 1024 * 1024; // base64 长度上限，约 < 7.5MB 原图
@@ -26,6 +25,33 @@ const SYSTEM_PROMPT =
   "4）按题号或自然顺序分段，保留题干、选项（如 A/B/C/D）、公式与换行；\n" +
   "5）若图片中能清楚看到原题的标准答案，也一并保留，标注为「答案：…」；\n" +
   "6）若某处实在无法辨认，用「〔？〕」占位，不要编造。";
+
+// 调用 MiMo 视觉接口。MiMo 官方文档两处写法不一致：
+// 多模态图片接口示例用 `api-key` 头，OpenAI SDK 风格用 `Authorization: Bearer`。
+// 为免用户线上测出 401 再手动改代码，这里自动兜底：先试 api-key，若返回 401 改用 Bearer 重试。
+async function callMimo(
+  apiKey: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const endpoint = `${MIMO_BASE_URL}/chat/completions`;
+  const tryWith = (header: string, value: string) =>
+    fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", [header]: value },
+      body: JSON.stringify(body),
+    });
+
+  const r1 = await tryWith("api-key", apiKey);
+  if (r1.status !== 401) return r1; // 非 401 直接返回（含成功与其他错误）
+
+  // 鉴权头不匹配（401）时才回退到 Authorization: Bearer
+  try {
+    const r2 = await tryWith("Authorization", `Bearer ${apiKey}`);
+    return r2;
+  } catch {
+    return r1; // 回退请求本身出错，保留原始 401 响应
+  }
+}
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.MIMO_API_KEY;
@@ -74,21 +100,14 @@ export async function POST(req: NextRequest) {
   ];
 
   try {
-    const resp = await fetch(`${MIMO_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        [MIMO_AUTH_HEADER]: apiKey,
-      },
-      body: JSON.stringify({
-        model: MIMO_MODEL,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content },
-        ],
-        temperature: 0.2,
-        max_tokens: 8000,
-      }),
+    const resp = await callMimo(apiKey, {
+      model: MIMO_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      temperature: 0.2,
+      max_tokens: 8000,
     });
 
     if (!resp.ok) {
