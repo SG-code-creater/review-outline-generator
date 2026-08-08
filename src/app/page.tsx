@@ -294,7 +294,7 @@ export default function Home() {
   function handleFeatureClick(f: (typeof FEATURES)[number]) {
     if (f.live && f.mode) {
       switchMode(f.mode);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      // Tab 栏已作为主导航，不再强制回顶；用户可通过 Tab 栏即时切换
     } else {
       setToastMsg(`「${f.title}」即将上线，敬请期待 ✨`);
     }
@@ -916,8 +916,34 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ─── 可自定义仪表盘（置顶，含问候/座右铭/天气/任务/番茄钟/趋势/打卡等） ─── */}
-        <Dashboard />
+        {/* ─── 模式切换 Tab 导航（替代底部卡片作为主导航） ─── */}
+        <nav className="flex gap-1 overflow-x-auto rounded-xl p-1 scrollbar-none"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--glass-border)' }}
+          aria-label="功能模块切换"
+        >
+          {([
+            { key: "outline" as Mode, label: "提纲生成", icon: "📝" },
+            { key: "flashcard" as Mode, label: "知识点卡片", icon: "🧠" },
+            { key: "quiz" as Mode, label: "自测题", icon: "❓" },
+            { key: "review" as Mode, label: "我的复习", icon: "🔄" },
+            { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
+          ]).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => { switchMode(tab.key); }}
+              className={`relative flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 ${
+                mode === tab.key
+                  ? 'text-white'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/[0.04]'
+              }`}
+              style={mode === tab.key ? ({ background: 'var(--gradient-teal)', boxShadow: '0 0 16px rgba(45,212,191,0.2)' }) : undefined}
+            >
+              <span className="text-sm">{tab.icon}</span>
+              <span className="whitespace-nowrap">{tab.label}</span>
+            </button>
+          ))}
+        </nav>
 
         {/* ─── 核心功能区（共用输入框，仅提纲/卡片/自测题模式） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
@@ -1007,6 +1033,9 @@ export default function Home() {
           </div>
         </section>
         )}
+
+        {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
+        {mode === "outline" && <Dashboard />}
 
         {error && (
           <div className="glass-card px-4 py-3" style={{ background: 'rgba(251,113,133,0.08)', borderColor: 'rgba(251,113,133,0.15)' }}>
@@ -1199,12 +1228,12 @@ export default function Home() {
         />
         )}
 
-        {/* ─── 学习工具板块 ─── */}
+        {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}
         <section className="flex flex-col gap-4">
           <div>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>学习工具</h2>
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>更多工具</h2>
             <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              学盒正在长成你的全能学习助手，以下功能陆续上线。
+              已上线的功能可通过顶部 Tab 栏快速切换，以下为功能一览与即将上线预告。
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

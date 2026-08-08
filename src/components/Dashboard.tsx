@@ -189,32 +189,59 @@ function WelcomeWidget() {
 
   return (
     <WidgetShell title="问候与座右铭" icon="💡">
-      <p className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        {greeting.icon} {greeting.text}，{""}
-        <span style={{ color: "var(--accent-teal)" }}>xuebox</span> 为你准备好了
-      </p>
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={save}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
-          className="glass-input w-full px-3 py-1.5 text-sm"
-          placeholder="写下你的座右铭…"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => { setDraft(motto); setEditing(true); }}
-          className="text-left text-sm italic transition-colors hover:text-[var(--text-primary)]"
-          style={{ color: "var(--text-secondary)" }}
-          title="点击编辑座右铭"
-        >
-          {motto || "写下一句属于你的座右铭，点击即可编辑"}
-        </button>
-      )}
-      <p className="text-sm" style={{ color: "var(--text-muted)" }}>“{quote}”</p>
+      {/* 主问候区：大图标 + 问候语 + 品牌名 */}
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl text-2xl"
+          style={{ background: 'rgba(45,212,191,0.1)', boxShadow: '0 0 20px rgba(45,212,191,0.1)' }}>
+          {greeting.icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-semibold leading-tight" style={{ color: "var(--text-primary)" }}>
+            {greeting.text}，<span style={{ color: "var(--accent-teal)" }}>xuebox</span> 为你准备好了
+          </p>
+        </div>
+      </div>
+
+      {/* 座右铭：引用样式编辑区 */}
+      <div className="relative rounded-lg border px-4 py-3 transition-colors"
+        style={{
+          background: 'rgba(255,255,255,0.02)',
+          borderColor: editing ? 'rgba(45,212,191,0.3)' : 'rgba(255,255,255,0.06)',
+          borderLeftWidth: '3px',
+          borderLeftColor: 'var(--accent-teal)',
+        }}
+      >
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+            className="w-full bg-transparent py-1 text-sm outline-none"
+            style={{ color: "var(--text-primary)" }}
+            placeholder="写下你的座右铭…"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => { setDraft(motto); setEditing(true); }}
+            className="w-full text-left text-sm leading-relaxed italic transition-opacity hover:opacity-80"
+            style={{ color: motto ? "var(--text-primary)" : "var(--text-muted)" }}
+            title="点击编辑座右铭"
+          >
+            {motto || "写下一句属于你的座右铭，点击即可编辑"}
+          </button>
+        )}
+      </div>
+
+      {/* 每日语录：装饰性引用 */}
+      <div className="flex items-start gap-2 pt-1" style={{ opacity: 0.7 }}>
+        <span className="text-lg leading-none" style={{ color: "var(--accent-amber)", fontFamily: 'Georgia, serif' }}>"</span>
+        <p className="flex-1 text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
+          {quote}
+        </p>
+      </div>
     </WidgetShell>
   );
 }
