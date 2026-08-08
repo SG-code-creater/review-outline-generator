@@ -103,9 +103,9 @@ export default function PaperAnalysisView({
   }
 
   // ── 异步识别：提交→轮询（绕开 EdgeOne 函数超时限制） ──
-  // ① POST 提交图片 → 立即返回 jobId（<100ms，不可能超时）
-  // ② 每 2.5s 轮询 GET ?jobId=xxx&images=… （每次都是新函数实例，全新超时预算）
-  // ③ MiMo 返回结果 → 填入文本框
+  // ① POST { images }           → 立即返回 jobId（<100ms，不可能超时）
+  // ② POST ?jobId=xxx { images } → 每次轮询都是新函数实例（全新超时预算），调 MiMo
+  // ③ MiMo 返回结果            → 填入文本框
   const MAX_POLL = 30;       // 最多轮询 30 次 × 2.5s = 75 秒
   const POLL_INTERVAL = 2500; // 轮询间隔 ms
 
@@ -125,16 +125,18 @@ export default function PaperAnalysisView({
       }
       const { jobId } = submitData;
 
-      // 步骤 2：轮询等待结果
-      // 图片数据 URL-encode 后通过 query 传递（避免 GET body 兼容性问题）
-      const imagesParam = encodeURIComponent(JSON.stringify(images));
-
+      // 步骤 2：轮询等待结果（每次 POST 都是新函数实例，全新超时预算）
       for (let i = 0; i < MAX_POLL; i++) {
         // 首次不等待，之后每次等 POLL_INTERVAL
         if (i > 0) await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 
         const pollRes = await fetch(
-          `/api/recognize?jobId=${jobId}&images=${imagesParam}`,
+          `/api/recognize?jobId=${jobId}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ images }),
+          },
         );
         const pollData = await pollRes.json();
 
