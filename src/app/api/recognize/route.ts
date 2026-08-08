@@ -89,9 +89,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "请先登录。" }, { status: 401 });
   }
 
-  // 如果请求带 jobId → 这是轮询请求（前端用 POST 兼容 JSON body）
+  // 如果请求带 jobId → 这是轮询请求（通过 query string 传递）
   const url = new URL(req.url);
-  const jobId = url.searchParams.get("jobId") || (await req.json())?.jobId;
+  const jobId = url.searchParams.get("jobId");
 
   if (jobId) {
     return handlePoll(req, apiKey, jobId);
