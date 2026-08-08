@@ -659,6 +659,36 @@ function resolve(item: LayoutItem, others: LayoutItem[]): LayoutItem {
   return { ...item, y };
 }
 
+// 把一组卡片整体排布：按顺序（先 y 后 x）逐个向下推，直到彼此不再重叠。
+// 用于响应式降级时把"自由布局"重排成不重叠的干净堆叠（堆叠/双列都依赖它）。
+function packAll(items: LayoutItem[]): LayoutItem[] {
+  const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+  const placed: LayoutItem[] = [];
+  for (const it of sorted) {
+    let cur: LayoutItem = { ...it };
+    let guard = 0;
+    while (placed.some((p) => overlaps(cur, p)) && guard < 1000) {
+      cur = { ...cur, y: cur.y + 1 };
+      guard++;
+    }
+    placed.push(cur);
+  }
+  return placed;
+}
+
+// 把 12 列坐标系的自由布局，缩放并重排到当前列数，保证任何屏幕都不重叠/不溢出。
+// cols === 12 时原样返回（桌面精确还原）；cols < 12 时等比缩放 x/w 再整体打包。
+function reflowToCols(layout: LayoutItem[], cols: number): LayoutItem[] {
+  if (cols === 12) return layout;
+  const f = cols / 12;
+  const scaled = layout.map((it) => {
+    const w = clamp(Math.round(it.w * f), MIN_W, cols);
+    const x = clamp(Math.round(it.x * f), 0, Math.max(0, cols - w));
+    return { ...it, x, w };
+  });
+  return packAll(scaled);
+}
+
 // 计算与其他卡片边缘对齐的参考线（px）。网格本身已做吸附，这里负责"对齐参考线"的可视化。
 function computeGuides(moved: LayoutItem, others: LayoutItem[], cw: number) {
   const v: number[] = [];
@@ -702,8 +732,12 @@ function DashboardGrid({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const dimsRef = useRef({ cols: 12, cw: 0 });
-  const cols = width ? colsForWidth(width) : 12;
-  dimsRef.current = { cols, cw: width ? (width - GAP * (cols - 1)) / cols : 0 };
+  // 编辑态强制 12 列画布（坐标体系恒定、存储始终为 12 列）；
+  // 查看态按实际宽度选列数，再 reflowToCols 重排为不重叠的响应式布局。
+  const gridCols = editing ? 12 : (width ? colsForWidth(width) : 12);
+  dimsRef.current = { cols: gridCols, cw: width ? (width - GAP * (gridCols - 1)) / gridCols : 0 };
+  // 查看态：把 12 列自由布局重排到当前列数（缩放 + 打包），杜绝手机端重叠/溢出。
+  const viewLayout = editing ? layout : reflowToCols(layout, gridCols);
 
   useEffect(() => {
     const el = ref.current;
@@ -794,11 +828,11 @@ function DashboardGrid({
     window.addEventListener("pointerup", onResizeUp);
   };
 
-  const active = preview ?? layout;
-  const cw = width ? (width - GAP * (cols - 1)) / cols : 0;
+  const active = preview ?? viewLayout;
+  const cw = width ? (width - GAP * (gridCols - 1)) / gridCols : 0;
   const geom = (it: LayoutItem) => {
-    const w = Math.min(it.w, cols);
-    const x = Math.min(it.x, cols - w);
+    const w = Math.min(it.w, gridCols);
+    const x = Math.min(it.x, gridCols - w);
     return {
       left: x * (cw + GAP),
       top: it.y * (ROW_H + GAP),
@@ -853,12 +887,37 @@ export default function Dashboard() {
   const [editing, setEditing] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
+  // 测量容器宽度，判断是否为手机/窄屏（≤4 列）——窄屏隐藏自由布局编辑，仅展示干净堆叠
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [secWidth, setSecWidth] = useState(0);
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const measure = () => setSecWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const secCols = secWidth ? colsForWidth(secWidth) : 12;
+  const compact = secCols <= 4; // 手机/窄屏
+  const effectiveEditing = compact ? false : editing;
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("xuebox_dash_layout");
       if (raw) {
-        const parsed = JSON.parse(raw) as LayoutItem[];
-        const valid = parsed.filter((l) => l.i in WIDGET_META);
+        const parsed = JSON.parse(raw) as Partial<LayoutItem>[];
+        // 归一化到 12 列安全范围，防止旧数据（曾在窄屏编辑）导致溢出/重叠
+        const valid = parsed
+          .filter((l): l is LayoutItem => !!l && l.i != null && l.i in WIDGET_META)
+          .map((l) => ({
+            ...l,
+            w: clamp(Math.round(l.w) || MIN_W, MIN_W, 12),
+            x: clamp(Math.round(l.x) || 0, 0, 12 - MIN_W),
+            h: clamp(Math.round(l.h) || MIN_H, MIN_H, 50),
+            y: Math.max(0, Math.round(l.y) || 0),
+          }));
         if (valid.length) setLayout(valid);
       }
     } catch {}
@@ -912,22 +971,24 @@ export default function Dashboard() {
   };
 
   return (
-    <section className="flex flex-col gap-4">
+    <section ref={sectionRef} className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>我的仪表盘</h2>
           <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-            点「自定义」增删组件、开启「自由布局」拖动调整大小与位置。
+            点「自定义」增删组件；更宽屏幕上可开启「自由布局」自由拖动调整大小与位置。
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setEditing((v) => !v)}
-            className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
-            style={editing ? { borderColor: "rgba(45,212,191,0.35)", color: "var(--accent-teal)", background: "rgba(45,212,191,0.08)" } : {}}
-          >
-            ✥ 自由布局{editing ? "：开" : ""}
-          </button>
+          {!compact && (
+            <button
+              onClick={() => setEditing((v) => !v)}
+              className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
+              style={effectiveEditing ? { borderColor: "rgba(45,212,191,0.35)", color: "var(--accent-teal)", background: "rgba(45,212,191,0.08)" } : {}}
+            >
+              ✥ 自由布局{effectiveEditing ? "：开" : ""}
+            </button>
+          )}
           <button
             onClick={() => setPanelOpen((o) => !o)}
             className="glass-btn inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium"
@@ -938,7 +999,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {editing && (
+      {effectiveEditing && (
         <p className="glass-badge glass-badge-soon self-start">拖动卡片右上角 ⠿ 移动，右下角 ⤡ 调整大小，自动保存</p>
       )}
 
@@ -963,7 +1024,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <DashboardGrid layout={layout} setLayout={persist} editing={editing} renderItem={renderItem} />
+      <DashboardGrid layout={layout} setLayout={persist} editing={effectiveEditing} renderItem={renderItem} />
     </section>
   );
 }
