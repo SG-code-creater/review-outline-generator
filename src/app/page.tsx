@@ -45,6 +45,10 @@ const MistakesView = dynamic(() => import("@/components/MistakesView"), {
   ssr: false,
   loading: () => <ViewSkeleton title="错题本" />,
 });
+const VocabView = dynamic(() => import("@/components/VocabView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="单词背诵" />,
+});
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -143,7 +147,8 @@ const FEATURES = [
   {
     title: "单词背诵助手",
     desc: "按词频与考频生成背诵清单，配合测验巩固记忆。",
-    live: false,
+    live: true,
+    mode: "vocab" as Mode,
   },
   {
     title: "试卷分析",
@@ -927,6 +932,7 @@ export default function Home() {
             { key: "quiz" as Mode, label: "自测题", icon: "❓" },
             { key: "review" as Mode, label: "我的复习", icon: "🔄" },
             { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
+            { key: "vocab" as Mode, label: "单词背诵", icon: "📚" },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -1226,6 +1232,10 @@ export default function Home() {
           uploadingMistakes={uploadingMistakes}
           uploadMistakesToServer={uploadMistakesToServer}
         />
+        )}
+
+        {mode === "vocab" && (
+          <VocabView isSignedIn={isSignedIn} />
         )}
 
         {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}
