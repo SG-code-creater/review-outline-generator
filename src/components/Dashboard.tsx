@@ -274,17 +274,48 @@ function WelcomeWidget() {
 function GoldenWidget() {
   const cats: GoldenCat[] = ["motiv", "essay", "master"];
   const [cat, setCat] = useState<GoldenCat>("motiv");
-  const [shuffle, setShuffle] = useState(0);
-  // 用「天」做种子，保证每天同一类别下取到固定的一句（每日更新）
+  const [text, setText] = useState("");
+  const [ai, setAi] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const reqId = useRef(0);
+
+  // 立刻展示一句精选（按日期取，零等待），AI 结果回来后再覆盖
   const dayBase = Math.floor(Date.now() / 86400000);
-  const list = GOLDEN[cat].items;
-  const text = list[(dayBase + shuffle) % list.length];
+  const curatedText = GOLDEN[cat].items[dayBase % GOLDEN[cat].items.length];
+  const display = text || curatedText;
+
+  // 切换类别时拉取该类别的「每日 AI 金句」（服务端按天缓存，每天只生成一次）
+  useEffect(() => {
+    setText("");
+    setAi(false);
+    const id = ++reqId.current;
+    fetch(`/api/daily-golden?cat=${cat}`)
+      .then((r) => r.json())
+      .then((j) => { if (id === reqId.current && j?.text) { setText(j.text); setAi(!!j.ai); } })
+      .catch(() => {});
+  }, [cat]);
+
+  // 「✨ AI 生成」：不想要当前这句，随时让 AI 重新生成一句
+  const generate = async () => {
+    setLoading(true);
+    const id = ++reqId.current;
+    try {
+      const r = await fetch(`/api/daily-golden?cat=${cat}&regen=1`);
+      const j = await r.json();
+      if (id === reqId.current && j?.text) { setText(j.text); setAi(!!j.ai); }
+    } catch {}
+    finally { if (id === reqId.current) setLoading(false); }
+  };
 
   return (
     <WidgetShell
       title="每日金句"
       icon="✨"
-      badge={<span className="glass-badge glass-badge-soon">每日更新</span>}
+      badge={
+        ai
+          ? <span className="glass-badge glass-badge-live">AI 生成</span>
+          : <span className="glass-badge glass-badge-soon">每日更新</span>
+      }
     >
       {/* 类别切换 */}
       <div className="flex flex-wrap gap-1.5">
@@ -292,7 +323,7 @@ function GoldenWidget() {
           <button
             key={c}
             type="button"
-            onClick={() => { setCat(c); setShuffle(0); }}
+            onClick={() => setCat(c)}
             className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
             style={
               c === cat
@@ -310,18 +341,19 @@ function GoldenWidget() {
         <span className="pointer-events-none absolute -top-1 left-0 text-4xl leading-none"
           style={{ color: "var(--accent-amber)", fontFamily: "Georgia, serif", opacity: 0.45 }}>"</span>
         <p className="pl-6 pr-1 text-sm leading-relaxed" style={{ color: "var(--text-primary)" }}>
-          {text}
+          {display}
         </p>
       </div>
 
-      {/* 换一句 */}
+      {/* AI 生成 / 换一句 */}
       <button
         type="button"
-        onClick={() => setShuffle((s) => s + 1)}
-        className="glass-btn self-start px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+        onClick={generate}
+        disabled={loading}
+        className="glass-btn self-start px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-60"
         style={{ color: "var(--accent-teal)", borderColor: "rgba(45,212,191,0.25)" }}
       >
-        ↻ 换一句
+        {loading ? "生成中…" : "✨ AI 生成"}
       </button>
     </WidgetShell>
   );
