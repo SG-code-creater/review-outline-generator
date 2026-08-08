@@ -12,7 +12,8 @@ import { useStudyStats } from "@/lib/useStudyStats";
 
 // ─── Widget 元数据 ───
 type WidgetKey =
-  | "welcome"   // 问候 + 座右铭 + 每日语录
+  | "welcome"   // 每日问候（时段问候 + 可编辑座右铭）
+  | "golden"    // 每日金句（励志语录 / 作文金句 / 名家片段）
   | "weather"   // 天气（Open-Meteo，免 key）
   | "tasks"     // 今日任务
   | "pomodoro"  // 番茄钟
@@ -24,7 +25,8 @@ type WidgetKey =
   | "stats";    // 学习概览（真实数据）
 
 const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc: string }> = {
-  welcome:   { label: "问候与座右铭", icon: "💡", desc: "时段问候 + 可编辑座右铭 + 每日语录" },
+  welcome:   { label: "每日问候", icon: "💡", desc: "时段问候 + 可编辑个人座右铭" },
+  golden:    { label: "每日金句", icon: "✨", desc: "励志语录 / 作文金句 / 名家片段，每日更新" },
   weather:   { label: "天气", icon: "🌤️", desc: "当前城市天气（无需密钥）" },
   tasks:     { label: "今日任务", icon: "✅", desc: "随手记今日待办，本地保存" },
   pomodoro:  { label: "番茄钟", icon: "⏳", desc: "25/5 专注计时，提升专注" },
@@ -51,6 +53,7 @@ const WIDGET_DEFAULT_POS: Record<WidgetKey, LayoutItem> = {
   clock:     { i: "clock",     x: 4,  y: 8,  w: 3, h: 4 },
   countdown: { i: "countdown", x: 7,  y: 8,  w: 5, h: 4 },
   calendar:  { i: "calendar",  x: 0,  y: 12, w: 4, h: 4 },
+  golden:    { i: "golden",    x: 4,  y: 12, w: 4, h: 4 },
 };
 
 // 默认展示的 6 个卡片（其余在「自定义」里手动加）
@@ -61,6 +64,7 @@ const DEFAULT_LAYOUT: LayoutItem[] = [
   WIDGET_DEFAULT_POS.pomodoro,
   WIDGET_DEFAULT_POS.tasks,
   WIDGET_DEFAULT_POS.trend,
+  WIDGET_DEFAULT_POS.golden,
 ];
 
 // ─── 后端真实统计（传给需要真实数据的 widget） ───
@@ -79,16 +83,46 @@ type Backend = {
   dbReady: boolean;
 };
 
-const QUOTES = [
-  "每一步都在靠近更好的自己。",
-  "今天的努力，是明天的底气。",
-  "把书读薄，把知识学厚。",
-  "慢一点也没关系，只要一直在走。",
-  "你背的每一个知识点，都在为未来铺路。",
-  "专注当下，结果会自己到来。",
-  "复习不是重复，而是让记忆生根。",
-  "你不需要很厉害才能开始，但开始了就会变厉害。",
-];
+// ─── 每日金句语料库（按类别组织，每日按日期取一句，可“换一句”切换） ───
+type GoldenCat = "motiv" | "essay" | "master";
+const GOLDEN: Record<GoldenCat, { name: string; items: string[] }> = {
+  motiv: {
+    name: "励志语录",
+    items: [
+      "你只管努力，剩下的交给时间。",
+      "不是因为看到希望才坚持，而是坚持了才看见希望。",
+      "所谓天才，不过是长久的忍耐与重复。",
+      "把平凡的事做到极致，本身就是一种不平凡。",
+      "今天的每一滴汗水，都是明天掌声的预付款。",
+      "别着急，慢慢变好，也是一种坚定的前进。",
+      "你现在读过的每一页书，都在悄悄拓宽未来的边界。",
+      "所有的惊艳，都来自长久而不动声色的准备。",
+    ],
+  },
+  essay: {
+    name: "作文金句",
+    items: [
+      "岁月不居，时节如流；唯奋斗者，能在时光中刻下姓名。",
+      "于高山之巅，方见大河奔涌；于群峰之上，更觉长风浩荡。",
+      "以梦为马，不负韶华；以心为灯，不惧长夜。",
+      "真正的远方，不在脚下，而在心中那束不肯熄灭的光。",
+      "时代奔涌向前，青年当以青春之我，创建青春之国家。",
+      "行而不辍，未来可期；心有所信，方能行远。",
+      "落笔为剑，以思考劈开迷雾；潜心为舟，以笃行渡过江河。",
+    ],
+  },
+  master: {
+    name: "名家片段",
+    items: [
+      "世界上只有一种真正的英雄主义，那就是在认清生活真相之后，依然热爱生活。—— 罗曼·罗兰",
+      "其实地上本没有路，走的人多了，也便成了路。—— 鲁迅",
+      "人的一生应当这样度过：当他回首往事时，不因虚度年华而悔恨。—— 奥斯特洛夫斯基",
+      "志之所趋，无远弗届；穷山距海，不能限也。——《格言联璧》",
+      "海纳百川，有容乃大；壁立千仞，无欲则刚。—— 林则徐",
+      "山高月小，水落石出。—— 苏轼",
+    ],
+  },
+};
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -175,7 +209,6 @@ function WelcomeWidget() {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const greeting = getGreeting();
-  const quote = QUOTES[new Date().getDate() % QUOTES.length];
 
   useEffect(() => {
     try { const s = localStorage.getItem("xuebox_motto"); if (s) setMotto(s); } catch {}
@@ -188,7 +221,7 @@ function WelcomeWidget() {
   };
 
   return (
-    <WidgetShell title="问候与座右铭" icon="💡">
+    <WidgetShell title="每日问候" icon="💡">
       {/* 主问候区：大图标 + 问候语 + 品牌名 */}
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 items-center justify-center rounded-xl text-2xl"
@@ -234,14 +267,62 @@ function WelcomeWidget() {
           </button>
         )}
       </div>
+    </WidgetShell>
+  );
+}
 
-      {/* 每日语录：装饰性引用 */}
-      <div className="flex items-start gap-2 pt-1" style={{ opacity: 0.7 }}>
-        <span className="text-lg leading-none" style={{ color: "var(--accent-amber)", fontFamily: 'Georgia, serif' }}>"</span>
-        <p className="flex-1 text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
-          {quote}
+function GoldenWidget() {
+  const cats: GoldenCat[] = ["motiv", "essay", "master"];
+  const [cat, setCat] = useState<GoldenCat>("motiv");
+  const [shuffle, setShuffle] = useState(0);
+  // 用「天」做种子，保证每天同一类别下取到固定的一句（每日更新）
+  const dayBase = Math.floor(Date.now() / 86400000);
+  const list = GOLDEN[cat].items;
+  const text = list[(dayBase + shuffle) % list.length];
+
+  return (
+    <WidgetShell
+      title="每日金句"
+      icon="✨"
+      badge={<span className="glass-badge glass-badge-soon">每日更新</span>}
+    >
+      {/* 类别切换 */}
+      <div className="flex flex-wrap gap-1.5">
+        {cats.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => { setCat(c); setShuffle(0); }}
+            className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            style={
+              c === cat
+                ? { background: "rgba(45,212,191,0.14)", color: "var(--accent-teal)", border: "1px solid rgba(45,212,191,0.3)" }
+                : { background: "rgba(255,255,255,0.03)", color: "var(--text-secondary)", border: "1px solid rgba(255,255,255,0.06)" }
+            }
+          >
+            {GOLDEN[c].name}
+          </button>
+        ))}
+      </div>
+
+      {/* 金句主体 */}
+      <div className="relative flex flex-1 items-center">
+        <span className="pointer-events-none absolute -top-1 left-0 text-4xl leading-none"
+          style={{ color: "var(--accent-amber)", fontFamily: "Georgia, serif", opacity: 0.45 }}>"</span>
+        <p className="pl-6 pr-1 text-sm leading-relaxed" style={{ color: "var(--text-primary)" }}>
+          {text}
         </p>
       </div>
+
+      {/* 换一句 */}
+      <button
+        type="button"
+        onClick={() => setShuffle((s) => s + 1)}
+        className="glass-btn self-start px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+        style={{ color: "var(--accent-teal)", borderColor: "rgba(45,212,191,0.25)" }}
+      >
+        ↻ 换一句
+      </button>
     </WidgetShell>
   );
 }
@@ -985,6 +1066,7 @@ export default function Dashboard() {
   const renderItem = (k: WidgetKey): React.ReactElement => {
     switch (k) {
       case "welcome": return <WelcomeWidget />;
+      case "golden": return <GoldenWidget />;
       case "weather": return <WeatherWidget />;
       case "tasks": return <TasksWidget />;
       case "pomodoro": return <PomodoroWidget />;
