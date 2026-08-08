@@ -41,6 +41,7 @@ export default function PaperAnalysisView({
   const [scenario, setScenario] = useState<Scenario>("通用");
   const [analyzing, setAnalyzing] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
+  const [recognizingMsg, setRecognizingMsg] = useState<string | undefined>();
   const [err, setErr] = useState("");
   const [questions, setQuestions] = useState<PaperQuestion[]>([]);
   const [analysis, setAnalysis] = useState<{
@@ -101,38 +102,72 @@ export default function PaperAnalysisView({
     });
   }
 
-  // ── 调用 /api/recognize（多图）── 带 120s 超时，视觉模型处理图片可能较慢 ──
+  // ── 异步识别：提交→轮询（绕开 EdgeOne 函数超时限制） ──
+  // ① POST 提交图片 → 立即返回 jobId（<100ms，不可能超时）
+  // ② 每 2.5s 轮询 GET ?jobId=xxx&images=… （每次都是新函数实例，全新超时预算）
+  // ③ MiMo 返回结果 → 填入文本框
+  const MAX_POLL = 30;       // 最多轮询 30 次 × 2.5s = 75 秒
+  const POLL_INTERVAL = 2500; // 轮询间隔 ms
+
   async function recognizeImages(images: string[], src: "image" | "pdf") {
     setRecognizing(true);
     setErr("");
-    // AbortController：120 秒超时（MiMo 视觉处理大图可能需要 30–90 秒）
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120_000);
     try {
-      const res = await fetch("/api/recognize", {
+      // 步骤 1：提交任务，获取 jobId
+      const submitRes = await fetch("/api/recognize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images }),
-        signal: controller.signal,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "识别失败");
-      setText((prev) => (prev ? prev + "\n\n" : "") + data.text.trim());
-      setSource(src);
-      setToast(
-        src === "pdf"
-          ? "已识别 PDF 页面，可编辑后点击分析"
-          : "已识别图片，可编辑后点击分析",
-      );
-    } catch (e: any) {
-      if (e?.name === "AbortError") {
-        setErr("识别超时（图片较大时处理时间较长）。建议裁剪到只含题目区域后重试。");
-      } else {
-        setErr(e instanceof Error ? e.message : "识别失败");
+      const submitData = await submitRes.json();
+      if (!submitRes.ok || !submitData.jobId) {
+        throw new Error(submitData?.error || "提交识别任务失败");
       }
+      const { jobId } = submitData;
+
+      // 步骤 2：轮询等待结果
+      // 图片数据 URL-encode 后通过 query 传递（避免 GET body 兼容性问题）
+      const imagesParam = encodeURIComponent(JSON.stringify(images));
+
+      for (let i = 0; i < MAX_POLL; i++) {
+        // 首次不等待，之后每次等 POLL_INTERVAL
+        if (i > 0) await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        const pollRes = await fetch(
+          `/api/recognize?jobId=${jobId}&images=${imagesParam}`,
+        );
+        const pollData = await pollRes.json();
+
+        if (pollData.status === "done" && pollData.text) {
+          // 识别完成
+          setText((prev) => (prev ? prev + "\n\n" : "") + pollData.text.trim());
+          setSource(src);
+          setToast(
+            src === "pdf"
+              ? "已识别 PDF 页面，可编辑后点击分析"
+              : "已识别图片，可编辑后点击分析",
+          );
+          return; // 成功退出
+        }
+
+        if (pollData.status === "error") {
+          throw new Error(pollData.error || "识别失败");
+        }
+
+        // status === "processing" → 继续轮询
+        // 更新提示文字让用户知道还在处理
+        if (i === 3) setRecognizingMsg("AI 正在分析试卷内容，请稍候...");
+        if (i === 10) setRecognizingMsg("复杂试卷识别中，通常需要 30–60 秒...");
+        if (i === 20) setRecognizingMsg("即将完成，请耐心等待...");
+      }
+
+      // 超过最大轮询次数
+      throw new Error("识别超时（已等待较长时间）。建议换一张更清晰的图或裁剪后重试。");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "识别失败");
     } finally {
-      clearTimeout(timer);
       setRecognizing(false);
+      setRecognizingMsg(undefined);
     }
   }
 
@@ -478,7 +513,7 @@ export default function PaperAnalysisView({
             style={{ background: "rgba(45,212,191,0.06)", color: "var(--text-secondary)" }}
           >
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-teal-400 border-t-transparent" />
-            识别中…正在把图片传给 AI 还原原题（会自动忽略手写、批改与涂改）
+            {recognizingMsg || "识别中…正在把图片传给 AI 还原原题（会自动忽略手写、批改与涂改）"}
           </div>
         )}
 
