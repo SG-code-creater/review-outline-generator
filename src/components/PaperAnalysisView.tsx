@@ -68,11 +68,11 @@ export default function PaperAnalysisView({
     }
   }, [toast]);
 
-  // ── 图片压缩（缩到长边 ≤1024，JPEG q60，极致压缩以在 EdgeOne 120s 超时内完成 MiMo 视觉识别） ──
+  // ── 图片压缩（极致：长边 ≤800，JPEG q50，优先保证 MiMo 在 EdgeOne 120s 超时内返回） ──
   function compressImage(
     file: File,
-    maxDim = 1024,
-    quality = 0.6,
+    maxDim = 800,
+    quality = 0.5,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
