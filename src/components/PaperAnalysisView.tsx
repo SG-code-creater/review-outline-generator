@@ -68,11 +68,11 @@ export default function PaperAnalysisView({
     }
   }, [toast]);
 
-  // ── 图片压缩（缩到长边 ≤2048，JPEG q80，省 token 也更快） ──
+  // ── 图片压缩（缩到长边 ≤1536，JPEG q70，平衡清晰度与 MiMo 处理速度） ──
   function compressImage(
     file: File,
-    maxDim = 2048,
-    quality = 0.8,
+    maxDim = 1536,
+    quality = 0.7,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -101,15 +101,19 @@ export default function PaperAnalysisView({
     });
   }
 
-  // ── 调用 /api/recognize（多图） ──
+  // ── 调用 /api/recognize（多图）── 带 120s 超时，视觉模型处理图片可能较慢 ──
   async function recognizeImages(images: string[], src: "image" | "pdf") {
     setRecognizing(true);
     setErr("");
+    // AbortController：120 秒超时（MiMo 视觉处理大图可能需要 30–90 秒）
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
     try {
       const res = await fetch("/api/recognize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "识别失败");
@@ -120,9 +124,14 @@ export default function PaperAnalysisView({
           ? "已识别 PDF 页面，可编辑后点击分析"
           : "已识别图片，可编辑后点击分析",
       );
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "识别失败");
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        setErr("识别超时（图片较大时处理时间较长）。建议裁剪到只含题目区域后重试。");
+      } else {
+        setErr(e instanceof Error ? e.message : "识别失败");
+      }
     } finally {
+      clearTimeout(timer);
       setRecognizing(false);
     }
   }

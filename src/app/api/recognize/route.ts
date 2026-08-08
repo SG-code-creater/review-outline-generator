@@ -53,6 +53,18 @@ async function callMimo(
   }
 }
 
+// 安全解析响应文本：若非 JSON（如 504 HTML 错误页），返回截断的原始文本而非崩溃
+async function safeResponseText(resp: Response): Promise<string> {
+  const ct = resp.headers.get("content-type") || "";
+  const text = await resp.text();
+  // 若 Content-Type 不是 JSON 或正文以 HTML 标签开头，说明是网关错误页等非 API 响应
+  if (!ct.includes("application/json") || text.trimStart().startsWith("<")) {
+    // 截取前 300 字符用于报错提示，避免把整个 HTML 页面塞进错误消息
+    return text.slice(0, 300).replace(/\s+/g, " ").trim();
+  }
+  return text;
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.MIMO_API_KEY;
   if (!apiKey) {
@@ -99,6 +111,8 @@ export async function POST(req: NextRequest) {
     ...images.map((url) => ({ type: "image_url", image_url: { url } })),
   ];
 
+  // ── 使用流式（streaming）调用 MiMo，避免 EdgeOne 网关因长时间无响应而 504 超时 ──
+  // 流式响应会持续推送 token，保持连接活跃；我们在服务端收集完整文本后一次性返回给前端。
   try {
     const resp = await callMimo(apiKey, {
       model: MIMO_MODEL,
@@ -108,30 +122,78 @@ export async function POST(req: NextRequest) {
       ],
       temperature: 0.2,
       max_tokens: 8000,
+      stream: true, // 流式：避免网关超时
     });
 
     if (!resp.ok) {
-      const detail = await resp.text();
+      const detail = await safeResponseText(resp);
+      // 常见超时/网关错误的友好提示
+      const isTimeout =
+        resp.status === 504 ||
+        detail.includes("504") ||
+        detail.toLowerCase().includes("timeout");
+      const msg = isTimeout
+        ? "识别服务响应超时（图片较大时处理时间较长）。建议：换一张更清晰的图、或裁剪到只包含题目区域后重试。"
+        : `识别服务调用失败（${resp.status}）：${detail}`;
+      return NextResponse.json({ error: msg }, { status: 502 });
+    }
+
+    // 收集流式响应的所有 chunk，拼成完整文本
+    const raw = await collectStreamText(resp.body);
+    if (!raw || raw.trim().length < 10) {
       return NextResponse.json(
-        { error: `识别服务调用失败（${resp.status}）：${detail.slice(0, 220)}` },
+        { error: "识别结果为空或过短，请换一张更清晰、少遮挡的图再试。" },
         { status: 502 },
       );
     }
 
-    const data = await resp.json();
-    const raw = data?.choices?.[0]?.message?.content?.trim() || "";
-    if (!raw) {
-      return NextResponse.json(
-        { error: "识别结果为空，请换一张更清晰、少遮挡的图再试。" },
-        { status: 502 },
-      );
-    }
-
-    return NextResponse.json({ ok: true, text: raw });
-  } catch {
-    return NextResponse.json(
-      { error: "调用识别服务时出错，请稍后重试。" },
-      { status: 502 },
-    );
+    return NextResponse.json({ ok: true, text: raw.trim() });
+  } catch (err: any) {
+    // 网络层异常（DNS 失败、连接重置、AbortError 等）
+    const msg =
+      err?.name === "AbortError"
+        ? "识别服务响应超时，请稍后重试（复杂图片可能需要更长时间）。"
+        : `调用识别服务时出错：${err?.message || "未知错误"}`;
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
+}
+
+// 从 SSE 流（Server-Sent Events）中收集 MiMo 返回的完整文本内容
+// OpenAI 兼容格式：data: {"choices":[{"delta":{"content":"..."}}]}
+// 结束标记：data: [DONE]
+async function collectStreamText(body: ReadableStream | null): Promise<string> {
+  if (!body) return "";
+
+  let fullText = "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      // SSE 流每行一个 event；我们只关心 data: 行
+      const lines = chunk.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim(); // 去掉 "data:" 前缀
+        if (payload === "[DONE]") return fullText;
+
+        try {
+          const parsed = JSON.parse(payload);
+          const delta = parsed?.choices?.[0]?.delta?.content;
+          if (typeof delta === "string") fullText += delta;
+        } catch {
+          // 单个 parse 失败忽略（可能是空行或非标准 chunk）
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return fullText;
 }
