@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
 
-// 试卷分析视图：粘贴试卷文本 → AI 识别题目 + 诊断薄弱点 → 勾选题目一键导入错题本。
-// 导入复用现有 /api/mistakes/upload（origin='upload'），错题直接进「错题本」与复习体系。
+// 试卷分析视图：
+//  - 粘贴 / 拍照 / 上传 PDF 试卷 → AI 识别题目 + 诊断薄弱点 → 勾选题目一键导入错题本。
+//  - 图片走 /api/recognize（小米 MiMo 视觉，忽略手写/批改/涂改）；PDF 用 pdfjs 提文字或转图识别。
+//  - 导入复用现有 /api/mistakes/upload（origin='upload'），错题直接进「错题本」与复习体系。
 
 interface PaperQuestion {
   question: string;
@@ -28,6 +30,8 @@ const DIFF_LABEL: Record<number, { text: string; color: string }> = {
   3: { text: "难", color: "rgba(239,68,68,0.95)" },
 };
 
+const MAX_IMAGES = 8; // 与 /api/recognize 上限一致
+
 export default function PaperAnalysisView({
   isSignedIn,
 }: {
@@ -36,6 +40,7 @@ export default function PaperAnalysisView({
   const [text, setText] = useState("");
   const [scenario, setScenario] = useState<Scenario>("通用");
   const [analyzing, setAnalyzing] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
   const [err, setErr] = useState("");
   const [questions, setQuestions] = useState<PaperQuestion[]>([]);
   const [analysis, setAnalysis] = useState<{
@@ -49,6 +54,13 @@ export default function PaperAnalysisView({
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState("");
 
+  // 导入相关
+  const [source, setSource] = useState<"image" | "pdf" | null>(null);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const albumRef = useRef<HTMLInputElement>(null);
+  const pdfRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 2800);
@@ -56,9 +68,150 @@ export default function PaperAnalysisView({
     }
   }, [toast]);
 
+  // ── 图片压缩（缩到长边 ≤2048，JPEG q80，省 token 也更快） ──
+  function compressImage(
+    file: File,
+    maxDim = 2048,
+    quality = 0.8,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("文件读取失败"));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("图片解码失败"));
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            const s = maxDim / Math.max(width, height);
+            width = Math.round(width * s);
+            height = Math.round(height * s);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return reject(new Error("无法创建画布"));
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ── 调用 /api/recognize（多图） ──
+  async function recognizeImages(images: string[], src: "image" | "pdf") {
+    setRecognizing(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/recognize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "识别失败");
+      setText((prev) => (prev ? prev + "\n\n" : "") + data.text.trim());
+      setSource(src);
+      setToast(
+        src === "pdf"
+          ? "已识别 PDF 页面，可编辑后点击分析"
+          : "已识别图片，可编辑后点击分析",
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "识别失败");
+    } finally {
+      setRecognizing(false);
+    }
+  }
+
+  // ── 处理相册/拍照选中的图片 ──
+  async function handleImages(files: FileList | File[]) {
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (arr.length === 0) return;
+    setErr("");
+    setRecognizing(true);
+    try {
+      const dataUrls: string[] = [];
+      for (const f of arr.slice(0, MAX_IMAGES)) {
+        dataUrls.push(await compressImage(f));
+      }
+      setPreviews(dataUrls);
+      await recognizeImages(dataUrls, "image");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "图片处理失败");
+      setRecognizing(false);
+    }
+  }
+
+  // ── 处理 PDF：数字版直接提文字，扫描版渲染成图交给 MiMo ──
+  async function handlePdf(file: File) {
+    setErr("");
+    setRecognizing(true);
+    try {
+      const pdfjs: any = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      const buf = await file.arrayBuffer();
+      const doc = await pdfjs.getDocument({ data: buf }).promise;
+      let extracted = "";
+      const pageImages: string[] = [];
+      const pageCount = Math.min(doc.numPages, MAX_IMAGES);
+      for (let n = 1; n <= pageCount; n++) {
+        const page = await doc.getPage(n);
+        // 数字 PDF：直接提文字
+        const tc = await page.getTextContent();
+        const pageText = (tc.items as any[])
+          .map((it) => ("str" in it ? it.str : ""))
+          .join(" ");
+        if (pageText.trim().length > 30) {
+          extracted += `\n--- 第 ${n} 页 ---\n${pageText}\n`;
+        } else {
+          // 扫描版：渲染成图，交给 MiMo 视觉识别（能忽略手写/批改）
+          const base = page.getViewport({ scale: 1 });
+          const scale = Math.min(2, 1600 / Math.max(base.width, base.height));
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) continue;
+          await page.render({ canvas, viewport } as any).promise;
+          pageImages.push(canvas.toDataURL("image/jpeg", 0.85));
+        }
+      }
+      if (extracted.trim().length > 40) {
+        setText((prev) => (prev ? prev + "\n\n" : "") + extracted.trim());
+        setSource("pdf");
+        setToast("已从 PDF 提取文字，可编辑后点击分析");
+      } else if (pageImages.length) {
+        setPreviews(pageImages);
+        await recognizeImages(pageImages, "pdf");
+      } else {
+        setErr("未能从 PDF 提取到内容，请确认文件有效或换一份。");
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "PDF 解析失败");
+    } finally {
+      setRecognizing(false);
+    }
+  }
+
+  function resetAll() {
+    setQuestions([]);
+    setAnalysis(null);
+    setText("");
+    setErr("");
+    setSource(null);
+    setPreviews([]);
+    setSelected(new Set());
+    setExpanded(new Set());
+  }
+
   function startAnalyze() {
     if (!text.trim()) {
-      setErr("请先粘贴或输入试卷内容。");
+      setErr("请先粘贴、拍照或上传试卷内容。");
       return;
     }
     setErr("");
@@ -158,16 +311,11 @@ export default function PaperAnalysisView({
             📊 试卷分析
           </h2>
           <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-            粘贴试卷内容，AI 识别题目并诊断薄弱考点，一键导入错题本反复练。
+            粘贴试卷，或拍照 / 上传 PDF，AI 识别题目并诊断薄弱考点，一键导入错题本反复练。
           </p>
         </div>
         <button
-          onClick={() => {
-            setQuestions([]);
-            setAnalysis(null);
-            setText("");
-            setErr("");
-          }}
+          onClick={resetAll}
           className="glass-btn px-3 py-1.5 text-xs"
           style={{ color: "var(--text-secondary)", borderColor: "var(--glass-border)" }}
         >
@@ -208,10 +356,113 @@ export default function PaperAnalysisView({
           </div>
         </div>
 
+        {/* 导入入口：拍照 / 相册 / PDF */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            或导入：
+          </span>
+          <button
+            type="button"
+            onClick={() => cameraRef.current?.click()}
+            disabled={recognizing}
+            className="glass-btn inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            style={{ color: "var(--text-secondary)", borderColor: "var(--glass-border)" }}
+          >
+            📷 拍照
+          </button>
+          <button
+            type="button"
+            onClick={() => albumRef.current?.click()}
+            disabled={recognizing}
+            className="glass-btn inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            style={{ color: "var(--text-secondary)", borderColor: "var(--glass-border)" }}
+          >
+            🖼 相册
+          </button>
+          <button
+            type="button"
+            onClick={() => pdfRef.current?.click()}
+            disabled={recognizing}
+            className="glass-btn inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            style={{ color: "var(--text-secondary)", borderColor: "var(--glass-border)" }}
+          >
+            📄 PDF
+          </button>
+          {source && text && (
+            <span
+              className="rounded-full px-2 py-0.5 text-xs"
+              style={{
+                background: "rgba(45,212,191,0.12)",
+                color: "var(--accent-teal)",
+              }}
+            >
+              {source === "pdf" ? "📄 已导入 PDF" : "📷 已识别图片"}
+            </span>
+          )}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) handleImages(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={albumRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) handleImages(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={pdfRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handlePdf(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
+
+        {/* 预览缩略图 */}
+        {previews.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {previews.map((p, i) => (
+              <img
+                key={i}
+                src={p}
+                alt=""
+                className="h-16 w-16 rounded-lg object-cover"
+                style={{ border: "1px solid rgba(255,255,255,0.12)" }}
+              />
+            ))}
+          </div>
+        )}
+
+        {recognizing && (
+          <div
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+            style={{ background: "rgba(45,212,191,0.06)", color: "var(--text-secondary)" }}
+          >
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-teal-400 border-t-transparent" />
+            识别中…正在把图片传给 AI 还原原题（会自动忽略手写、批改与涂改）
+          </div>
+        )}
+
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="在此粘贴试卷 / 练习的题目与内容（支持含选项、答案或你的作答）。AI 会从中识别题目并分析薄弱点。"
+          placeholder="在此粘贴试卷 / 练习的题目与内容；或点击上方「拍照 / 相册 / PDF」直接导入。AI 会从中识别题目并分析薄弱点。导入内容可在此二次编辑。"
           className="glass-input min-h-[160px] w-full resize-y px-4 py-3 text-sm leading-relaxed"
           style={{ background: "rgba(255,255,255,0.03)" }}
         />
@@ -219,10 +470,10 @@ export default function PaperAnalysisView({
         <div className="flex items-center gap-3">
           <button
             onClick={startAnalyze}
-            disabled={analyzing || !text.trim()}
+            disabled={analyzing || recognizing || !text.trim()}
             className="glass-btn inline-flex items-center gap-1.5 px-5 py-2 text-sm font-medium"
             style={
-              analyzing || !text.trim()
+              analyzing || recognizing || !text.trim()
                 ? { opacity: 0.5, color: "var(--text-secondary)", borderColor: "var(--glass-border)" }
                 : {
                     background: "var(--gradient-teal)",
