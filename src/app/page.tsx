@@ -1035,24 +1035,17 @@ export default function Home() {
         </section>
         )}
 
-        {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
-        {mode === "outline" && <DashboardNoSSR />}
-
-        {/* 提纲模式下的功能引导（提示用户往下有更多工具） */}
+        {/* 提纲模式下的功能引导（置于输入模块下、仪表盘上，纯提示不可点击） */}
         {mode === "outline" && (
-          <div className="flex items-center justify-center gap-2 py-2 text-xs cursor-pointer group"
-            onClick={() => {
-              const el = document.querySelector('section:has(> div > p:contains("点击下方卡片"))');
-              // fallback: scroll to bottom area
-              const sections = document.querySelectorAll('section.glass-card, section.flex');
-              if (sections.length > 3) sections[sections.length - 2]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }}
+          <div className="flex items-center justify-center gap-2 py-1.5 text-xs"
             style={{ color: 'var(--text-muted)' }}
           >
-            <span className="group-hover:text-[var(--accent-teal)] transition-colors">更多学习工具在下方 ↓</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 animate-bounce"><path d="M7 13l5 5 5-5"/></svg>
+            <span>更多学习工具在下方 ↓</span>
           </div>
         )}
+
+        {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
+        {mode === "outline" && <DashboardNoSSR />}
 
         {error && (
           <div className="glass-card px-4 py-3" style={{ background: 'rgba(251,113,133,0.08)', borderColor: 'rgba(251,113,133,0.15)' }}>
