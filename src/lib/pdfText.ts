@@ -3,8 +3,8 @@
 /** 浏览器端用 pdfjs 从 PDF 抽取纯文本（不依赖后端，免费） */
 export async function extractPdfText(file: File): Promise<string> {
   const pdfjs = await import("pdfjs-dist");
-  // 固定版本 CDN，避免动态版本导致 _renderPageChunk 崩溃
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/build/pdf.worker.min.mjs`;
+  // 用 unpkg CDN（cdnjs 的 .mjs 在浏览器动态 import 下会 Failed to fetch）
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
   const buf = await file.arrayBuffer();
   const doc = await pdfjs.getDocument({ data: buf }).promise;
   let out = "";

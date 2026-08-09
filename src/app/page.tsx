@@ -58,6 +58,18 @@ const PdfQaView = dynamic(() => import("@/components/PdfQaView"), {
   loading: () => <ViewSkeleton title="PDF 智能问答" />,
 });
 
+// ─── 模式中文名（用于非提纲模式的返回提示） ───
+const MODE_LABELS: Record<Mode, string> = {
+  outline: "提纲生成",
+  flashcard: "知识点卡片",
+  quiz: "自测题",
+  review: "我的复习",
+  mistakes: "错题本",
+  vocab: "单词背诵",
+  exam: "考试倒计时",
+  pdfqa: "PDF 问答",
+};
+
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
   错题本整理: (
@@ -291,11 +303,11 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [toastMsg]);
 
-  // 功能卡片点击：已上线 → 切换模式；未上线 → 提示
+  // 功能卡片点击：已上线 → 切换模式并滚顶；未上线 → 提示
   function handleFeatureClick(f: (typeof FEATURES)[number]) {
     if (f.live && f.mode) {
       switchMode(f.mode);
-      // Tab 栏已作为主导航，不再强制回顶；用户可通过 Tab 栏即时切换
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
       setToastMsg(`「${f.title}」即将上线，敬请期待 ✨`);
     }
@@ -917,37 +929,19 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ─── 模式切换 Tab 导航（替代底部卡片作为主导航） ─── */}
-        <nav className="flex gap-1 overflow-x-auto rounded-xl p-1 scrollbar-none"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--glass-border)' }}
-          aria-label="功能模块切换"
-        >
-          {([
-            { key: "outline" as Mode, label: "提纲生成", icon: "📝" },
-            { key: "flashcard" as Mode, label: "知识点卡片", icon: "🧠" },
-            { key: "quiz" as Mode, label: "自测题", icon: "❓" },
-            { key: "review" as Mode, label: "我的复习", icon: "🔄" },
-            { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
-            { key: "vocab" as Mode, label: "单词背诵", icon: "📚" },
-            { key: "exam" as Mode, label: "考试倒计时", icon: "⏰" },
-            { key: "pdfqa" as Mode, label: "PDF 问答", icon: "📄" },
-          ]).map((tab) => (
+        {/* ─── 模式切换提示（非提纲模式时显示返回入口） ─── */}
+        {mode !== "outline" && (
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
             <button
-              key={tab.key}
               type="button"
-              onClick={() => { switchMode(tab.key); }}
-              className={`relative flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-200 ${
-                mode === tab.key
-                  ? 'text-white'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/[0.04]'
-              }`}
-              style={mode === tab.key ? ({ background: 'var(--gradient-teal)', boxShadow: '0 0 16px rgba(45,212,191,0.2)' }) : undefined}
+              onClick={() => { switchMode("outline"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-[var(--accent-teal)] transition-colors"
             >
-              <span className="text-sm">{tab.icon}</span>
-              <span className="whitespace-nowrap">{tab.label}</span>
+              ← 返回提纲生成器
             </button>
-          ))}
-        </nav>
+            <span>· 当前：{MODE_LABELS[mode] || mode}</span>
+          </div>
+        )}
 
         {/* ─── 核心功能区（共用输入框，仅提纲/卡片/自测题模式） ─── */}
         {(mode === "outline" || mode === "flashcard" || mode === "quiz") && (
@@ -1040,6 +1034,22 @@ export default function Home() {
 
         {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
         {mode === "outline" && <Dashboard />}
+
+        {/* 提纲模式下的功能引导（提示用户往下有更多工具） */}
+        {mode === "outline" && (
+          <div className="flex items-center justify-center gap-2 py-2 text-xs cursor-pointer group"
+            onClick={() => {
+              const el = document.querySelector('section:has(> div > p:contains("点击下方卡片"))');
+              // fallback: scroll to bottom area
+              const sections = document.querySelectorAll('section.glass-card, section.flex');
+              if (sections.length > 3) sections[sections.length - 2]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <span className="group-hover:text-[var(--accent-teal)] transition-colors">更多学习工具在下方 ↓</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 animate-bounce"><path d="M7 13l5 5 5-5"/></svg>
+          </div>
+        )}
 
         {error && (
           <div className="glass-card px-4 py-3" style={{ background: 'rgba(251,113,133,0.08)', borderColor: 'rgba(251,113,133,0.15)' }}>
@@ -1244,14 +1254,16 @@ export default function Home() {
           <PdfQaView isSignedIn={isSignedIn} />
         )}
 
-        {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}
+        {/* ─── 更多工具导航（底部卡片，主导航入口） ─── */}
         <section className="flex flex-col gap-4">
-          <div>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>更多工具</h2>
-            <p className="mt-1.5 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              已上线的功能可通过顶部 Tab 栏快速切换，以下为功能一览与即将上线预告。
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1" style={{ background: 'var(--glass-border)' }} />
+            <span className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>更多学习工具</span>
+            <div className="h-px flex-1" style={{ background: 'var(--glass-border)' }} />
           </div>
+          <p className="text-sm leading-relaxed -mt-2" style={{ color: 'var(--text-secondary)' }}>
+            点击下方卡片切换功能模块 ↓
+          </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f, idx) => {
               const isActive = f.live && !!f.mode && mode === f.mode;
