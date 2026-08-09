@@ -3,6 +3,7 @@
 import { type RefObject } from "react";
 import { type Mistake } from "@/components/view-types";
 import { highlightSource } from "@/components/shared-ui";
+import EmptyState from "@/components/EmptyState";
 
 interface MistakesViewProps {
   isSignedIn: boolean | undefined;
@@ -168,12 +169,12 @@ export default function MistakesView({
           {mistakeLoading && mistakes.length === 0 ? (
             <p className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
           ) : mistakes.length === 0 ? (
-            <div className="py-6 text-center">
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>错题本还是空的。</p>
-              <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                去自测题答题（答错可收入），或直接在上方上传试卷/错题图片。
-              </p>
-            </div>
+            <EmptyState
+              icon="📕"
+              title="错题本还是空的"
+              description="去自测题答题（答错可自动收入），或直接在上方上传试卷 / 错题图片，AI 会帮你整理出知识点与正确答案。"
+              accent="coral"
+            />
           ) : (
             <div className="flex flex-col gap-4">
               {/* 来源分组 chips */}

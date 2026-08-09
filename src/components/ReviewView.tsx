@@ -9,6 +9,7 @@ import {
 } from "@/components/view-types";
 import { cardStatus } from "@/components/shared-ui";
 import { renderMarkdown } from "@/lib/markdown";
+import EmptyState from "@/components/EmptyState";
 
 interface ReviewViewProps {
   isSignedIn: boolean | undefined;
@@ -125,12 +126,12 @@ export default function ReviewView({
             ) : reviewLoading && reviewCards.length === 0 ? (
               <p className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
             ) : reviewCards.length === 0 ? (
-              <div className="py-10 text-center">
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>还没有待复习的卡片。</p>
-                <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  去「知识点卡片」生成后点击「保存到我的卡片」即可在这里复习。
-                </p>
-              </div>
+              <EmptyState
+                icon="🔄"
+                title="还没有待复习的卡片"
+                description="去「知识点卡片」生成内容后点击「保存到我的卡片」，系统会按遗忘曲线在合适的时间提醒你复习。"
+                accent="emerald"
+              />
             ) : reviewIndex >= reviewCards.length ? (
               <div className="py-10 text-center">
                 <p className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>本轮复习完成！</p>
@@ -267,12 +268,13 @@ export default function ReviewView({
                   {collectionLoading && collectionCards.length === 0 ? (
                     <p className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
                   ) : collectionCards.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>还没有保存的卡片。</p>
-                      <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                        去「知识点卡片」生成后点击「保存到我的卡片」。
-                      </p>
-                    </div>
+                    <EmptyState
+                      icon="🧠"
+                      title="还没有保存的卡片"
+                      description="去「知识点卡片」生成内容后点击「保存到我的卡片」，就能在这里集中复习它们。"
+                      accent="purple"
+                      compact
+                    />
                   ) : filtered.length === 0 ? (
                     <p className="py-8 text-center text-sm text-stone-400">
                       该筛选下没有卡片。
@@ -366,12 +368,13 @@ export default function ReviewView({
             (outlineLoading && outlines.length === 0 ? (
               <p className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
             ) : outlines.length === 0 ? (
-              <div className="py-10 text-center">
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>还没有收藏的提纲。</p>
-                <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  在「提纲生成」生成后点击「保存到我的提纲」即可沉淀到这里。
-                </p>
-              </div>
+              <EmptyState
+                icon="📝"
+                title="还没有收藏的提纲"
+                description="在「提纲生成」生成内容后点击「保存到我的提纲」，就能在这里沉淀与随时回看。"
+                accent="teal"
+                compact
+              />
             ) : (
               <div className="flex flex-col gap-3">
                 {outlines.map((o) => (

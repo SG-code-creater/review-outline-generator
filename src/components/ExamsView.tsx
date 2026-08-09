@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import EmptyState from "@/components/EmptyState";
 
 // 考试倒计时视图：多考试管理 + 实时倒计时。
 // 数据落在 exams 表（user_id 隔离），通过 /api/exams 增删改查。
@@ -278,12 +279,13 @@ export default function ExamsView({ isSignedIn }: { isSignedIn?: boolean }) {
         </div>
       ) : (
         !loading && (
-          <div className="glass-card flex flex-col items-center gap-2 p-8 text-center">
-            <div className="text-3xl">🎯</div>
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              暂无即将到来的考试，点击「添加考试」开始规划吧。
-            </p>
-          </div>
+          <EmptyState
+            icon="🎯"
+            title="还没有添加考试"
+            description="设置考试日期后，这里会显示实时倒计时，帮你把握复习节奏。"
+            accent="amber"
+            action={{ label: "添加考试", onClick: () => setShowForm(true) }}
+          />
         )
       )}
 
