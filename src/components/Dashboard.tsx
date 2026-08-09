@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { useStudyStats } from "@/lib/useStudyStats";
+import type { Mode } from "@/components/view-types";
 
 /* ══════════════════════════════════════════════════════════════
    学盒 xuebox — 可自由布局的仪表盘
@@ -1021,7 +1022,11 @@ function DashboardGrid({
 }
 
 /* ════════════════ 主仪表盘（含自定义面板） ════════════════ */
-export default function Dashboard() {
+export default function Dashboard({
+  onNavigate,
+}: {
+  onNavigate?: (mode: Mode) => void;
+}) {
   const { stats, loading } = useStudyStats();
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT);
   const [editing, setEditing] = useState(false);
@@ -1080,6 +1085,53 @@ export default function Dashboard() {
   };
   const resetLayout = () => persist(DEFAULT_LAYOUT);
 
+  // ── 跨内容全局搜索（提纲 / 卡片 / 错题） ──
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    Array<{
+      type: "outline" | "card" | "mistake";
+      id: string;
+      title: string;
+      snippet: string;
+      mode: "review" | "mistakes";
+    }>
+  >([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const searchTimer = useRef<number | undefined>(undefined);
+
+  const runSearch = useCallback(async (term: string) => {
+    const t = term.trim();
+    if (!t) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(t)}`);
+      const data = await res.json();
+      setSearchResults(Array.isArray(data.results) ? data.results : []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  const onSearchChange = (v: string) => {
+    setSearchQ(v);
+    setSearchOpen(true);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => runSearch(v), 250);
+  };
+
+  const pickResult = (mode: "review" | "mistakes") => {
+    setSearchOpen(false);
+    setSearchQ("");
+    setSearchResults([]);
+    onNavigate?.(mode);
+  };
+
   const backend: Backend = {
     loggedIn: stats.loggedIn,
     loading,
@@ -1113,6 +1165,57 @@ export default function Dashboard() {
 
   return (
     <section ref={sectionRef} className="flex flex-col gap-4">
+      {/* 跨内容全局搜索 */}
+      <div className="glass-card flex flex-col gap-2 p-3">
+        <div className="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 shrink-0" style={{ color: "var(--text-muted)" }}>
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" strokeLinecap="round" />
+          </svg>
+          <input
+            id="global-search"
+            value={searchQ}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+            placeholder="搜索提纲 / 卡片 / 错题…"
+            className="glass-input h-9 w-full px-3 text-sm"
+          />
+          {searching && (
+            <span className="shrink-0 text-xs" style={{ color: "var(--text-muted)" }}>
+              搜索中…
+            </span>
+          )}
+        </div>
+        {searchOpen && searchQ.trim() && (
+          <div className="flex max-h-80 flex-col gap-1 overflow-auto">
+            {searchResults.length === 0 && !searching && (
+              <p className="px-2 py-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                没有匹配的内容
+              </p>
+            )}
+            {searchResults.map((r) => (
+              <button
+                key={`${r.type}-${r.id}`}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickResult(r.mode)}
+                className="rounded-lg px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+                style={{ border: "0.5px solid var(--glass-border)" }}
+              >
+                <span className="font-medium" style={{ color: "var(--text-primary)" }}>
+                  [{r.type === "outline" ? "提纲" : r.type === "card" ? "卡片" : "错题"}] {r.title}
+                </span>
+                {r.snippet && (
+                  <span className="mt-0.5 block truncate" style={{ color: "var(--text-secondary)" }}>
+                    {r.snippet}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>我的仪表盘</h2>

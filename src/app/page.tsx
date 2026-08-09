@@ -1045,7 +1045,7 @@ export default function Home() {
         )}
 
         {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
-        {mode === "outline" && <DashboardNoSSR />}
+        {mode === "outline" && <DashboardNoSSR onNavigate={(m) => switchMode(m)} />}
 
         {error && (
           <div className="glass-card px-4 py-3" style={{ background: 'rgba(251,113,133,0.08)', borderColor: 'rgba(251,113,133,0.15)' }}>
