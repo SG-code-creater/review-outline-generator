@@ -166,6 +166,7 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
           {showPaste && (
             <div className="w-full flex flex-col gap-2">
               <textarea
+                id="pdfqa-paste"
                 value={pasteText}
                 onChange={(e) => setPasteText(e.target.value)}
                 placeholder="把课件或笔记内容粘贴到这里……"
@@ -253,6 +254,7 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
       {/* 输入区 */}
       <div className="flex items-end gap-2">
         <textarea
+          id="pdfqa-question"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {

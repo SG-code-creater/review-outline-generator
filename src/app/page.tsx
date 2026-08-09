@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import { useState, useEffect, useRef } from "react";
 import Dashboard from "@/components/Dashboard";
+// Dashboard 包含 new Date()/Date.now() 等时间敏感逻辑，必须 ssr: false 避免 Hydration #31
+const DashboardNoSSR = dynamic(() => import("@/components/Dashboard"), { ssr: false });
 import { useUser } from "@clerk/nextjs";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
 import { renderMarkdown } from "@/lib/markdown";
@@ -1034,7 +1036,7 @@ export default function Home() {
         )}
 
         {/* ─── 仪表盘（提纲模式下显示在输入区下方，其他模式不占空间） ─── */}
-        {mode === "outline" && <Dashboard />}
+        {mode === "outline" && <DashboardNoSSR />}
 
         {/* 提纲模式下的功能引导（提示用户往下有更多工具） */}
         {mode === "outline" && (
