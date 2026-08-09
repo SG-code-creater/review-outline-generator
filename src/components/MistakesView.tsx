@@ -1,9 +1,36 @@
 "use client";
 
-import { type RefObject } from "react";
+import { type RefObject, useState } from "react";
 import { type Mistake } from "@/components/view-types";
 import { highlightSource } from "@/components/shared-ui";
 import EmptyState from "@/components/EmptyState";
+
+// 错因类型（与 upload 接口 prompt 枚举保持一致）
+export const MISTAKE_CAUSES = [
+  "概念混淆",
+  "计算失误",
+  "审题偏差",
+  "公式定理遗忘",
+  "解题思路",
+  "其他",
+] as const;
+
+// 错因 → 配色（背景 / 文字）
+const CAUSE_STYLE: Record<string, { bg: string; color: string; border: string }> = {
+  概念混淆: { bg: "rgba(167,139,250,0.1)", color: "var(--accent-purple)", border: "rgba(167,139,250,0.2)" },
+  计算失误: { bg: "rgba(250,204,21,0.1)", color: "#EAB308", border: "rgba(250,204,21,0.2)" },
+  审题偏差: { bg: "rgba(56,138,221,0.1)", color: "var(--accent-blue)", border: "rgba(56,138,221,0.2)" },
+  公式定理遗忘: { bg: "rgba(45,212,191,0.1)", color: "var(--accent-teal)", border: "rgba(45,212,191,0.2)" },
+  解题思路: { bg: "rgba(251,113,133,0.1)", color: "var(--accent-coral)", border: "rgba(251,113,133,0.2)" },
+  其他: { bg: "rgba(255,255,255,0.05)", color: "var(--text-secondary)", border: "rgba(255,255,255,0.1)" },
+};
+
+function causeStyle(cause: string | null | undefined) {
+  if (!cause || !CAUSE_STYLE[cause]) {
+    return { bg: "rgba(255,255,255,0.03)", color: "var(--text-muted)", border: "rgba(255,255,255,0.08)" };
+  }
+  return CAUSE_STYLE[cause];
+}
 
 interface MistakesViewProps {
   isSignedIn: boolean | undefined;
@@ -46,6 +73,8 @@ export default function MistakesView({
   uploadingMistakes,
   uploadMistakesToServer,
 }: MistakesViewProps) {
+  const [causeFilter, setCauseFilter] = useState<string>("all");
+
   return (
     <section className="glass-card flex flex-col gap-4 p-6">
       <div className="flex items-center justify-between">
@@ -198,8 +227,34 @@ export default function MistakesView({
                 ))}
               </div>
 
+              {/* 错因筛选 chips */}
+              <div
+                className="flex flex-wrap gap-1 rounded-lg p-1 w-fit"
+                style={{ background: "rgba(255,255,255,0.04)", border: "0.5px solid var(--glass-border)" }}
+              >
+                {(["all", ...MISTAKE_CAUSES, "__none__"] as string[]).map((v) => {
+                  const label = v === "all" ? "全部错因" : v === "__none__" ? "未归因" : v;
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => setCauseFilter(v)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                        causeFilter === v ? "glass-pill-active" : "glass-pill"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
               {mistakes
-                .filter((m) => mistakeOrigin === "all" || m.origin === mistakeOrigin)
+                .filter(
+                  (m) =>
+                    (mistakeOrigin === "all" || m.origin === mistakeOrigin) &&
+                    (causeFilter === "all" ||
+                      (causeFilter === "__none__" ? !m.cause : m.cause === causeFilter)),
+                )
                 .map((m) => {
                   const open = openMistakeId === m.id;
                   return (
@@ -217,6 +272,20 @@ export default function MistakesView({
                       >
                         {m.origin === "quiz" ? "来自自测题" : "上传错题"}
                       </span>
+                      <span
+                        className="self-start rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        style={{
+                          ...causeStyle(m.cause),
+                          border: "0.5px solid",
+                        }}
+                      >
+                        {m.cause || "未归因"}
+                      </span>
+                      {m.weak_point && (
+                        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          薄弱点：{m.weak_point}
+                        </p>
+                      )}
                       <p className="text-sm font-medium leading-relaxed" style={{ color: 'var(--text-primary)' }}>
                         {m.question}
                       </p>

@@ -32,6 +32,8 @@ export interface Mistake {
   picked: number | null;
   explanation: string | null;
   evidence: string | null;
+  cause: string | null;
+  weak_point: string | null;
   source_text: string;
   source_title: string | null;
   created_at: string;

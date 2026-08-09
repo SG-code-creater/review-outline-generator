@@ -19,8 +19,10 @@ const SYSTEM_PROMPT =
   "2）给出正确答案；" +
   "3）附一句简短解析；" +
   "4）evidence 字段：从原文中**原样摘录**一句与该题相关的原文（用于溯源）；" +
-  "5）用中文；只输出 JSON 数组，不要围栏或额外说明：" +
-  '[{"question":"题干","options":["A","B","C","D"],"answer":0,"explanation":"解析","evidence":"原文依据"}]。';
+  "5）cause 字段：从下列错因类型中**选一个**标注：概念混淆 / 计算失误 / 审题偏差 / 公式定理遗忘 / 解题思路 / 其他；" +
+  "6）weak_point 字段：用一句话指出该题考查的薄弱知识点（如『二次函数最值』）；" +
+  "7）用中文；只输出 JSON 数组，不要围栏或额外说明：" +
+  '[{"question":"题干","options":["A","B","C","D"],"answer":0,"explanation":"解析","evidence":"原文依据","cause":"概念混淆","weak_point":"薄弱知识点"}]。';
 
 interface MistakeItem {
   question: string;
@@ -28,6 +30,8 @@ interface MistakeItem {
   answer: number;
   explanation: string;
   evidence?: string;
+  cause?: string;
+  weak_point?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -126,7 +130,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "服务端数据库未配置。" }, { status: 500 });
     }
 
-    const rows = toImport.map((item) => ({
+      const rows = toImport.map((item) => ({
       user_id: userId,
       origin: "upload",
       question: item.question,
@@ -135,6 +139,8 @@ export async function POST(req: NextRequest) {
       picked: null,
       explanation: item.explanation || null,
       evidence: item.evidence || null,
+      cause: item.cause || null,
+      weak_point: item.weak_point || null,
       source_text: text,
       source_title: scenarioLabel
         ? `${scenarioLabel} - 上传错题`
@@ -207,6 +213,8 @@ function normalize(arr: unknown[]): MistakeItem[] {
         answer,
         explanation: String(it.explanation ?? ""),
         evidence: it.evidence ? String(it.evidence) : undefined,
+        cause: it.cause ? String(it.cause) : undefined,
+        weak_point: it.weak_point ? String(it.weak_point) : undefined,
       };
     })
     .filter((q) => q.question && q.options.length >= 2);
