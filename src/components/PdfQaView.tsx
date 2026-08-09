@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { extractPdfText, chunkText, retrieveTopChunks } from "@/lib/pdfText";
+import { renderMarkdown } from "@/lib/markdown";
 
 // PDF 智能问答：上传课件 → 浏览器端抽文切片 → 提问时客户端检索 top-k → DeepSeek 带出处作答。
 // 零成本：不落库、不用向量库，检索走中文词重叠。
@@ -213,7 +214,7 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
         {messages.map((m, idx) => (
           <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[88%] flex flex-col gap-1.5 ${m.role === "user" ? "items-end" : "items-start"}`}>
-              <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+              <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words ${
                 m.role === "user"
                   ? "text-white"
                   : ""
@@ -222,8 +223,10 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
                   m.role === "user"
                     ? { background: "var(--gradient-teal)", boxShadow: "0 0 16px rgba(45,212,191,0.18)" }
                     : { background: "rgba(255,255,255,0.04)", border: "0.5px solid var(--glass-border)", color: "var(--text-primary)" }
-                }>
-                {m.content}
+                }
+                dangerouslySetInnerHTML={m.role === "ai" ? { __html: renderMarkdown(m.content) } : undefined}
+              >
+                {m.role === "user" ? m.content : undefined}
               </div>
               {m.role === "ai" && m.sources && m.sources.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-1">

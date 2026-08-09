@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import Dashboard from "@/components/Dashboard";
 import { useUser } from "@clerk/nextjs";
 import { SCENARIOS, type Scenario } from "@/lib/scenarios";
+import { renderMarkdown } from "@/lib/markdown";
 import {
   type Mode,
   type ReviewView,
@@ -1071,9 +1072,11 @@ export default function Home() {
                 </button>
               </div>
             </div>
-            <pre className="whitespace-pre-wrap break-words rounded-xl p-4 text-sm leading-7" style={{ background: 'rgba(0,0,0,0.25)', color: 'var(--text-primary)', border: '0.5px solid var(--glass-border)' }}>
-              {outline}
-            </pre>
+            <div
+              className="break-words rounded-xl p-4 text-sm leading-7"
+              style={{ background: 'rgba(0,0,0,0.25)', color: 'var(--text-primary)', border: '0.5px solid var(--glass-border)' }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(outline) }}
+            />
             {/* 收藏提纲 */}
             <div className="mt-1 flex flex-col gap-2 border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
               <div className="flex flex-wrap items-center gap-2">

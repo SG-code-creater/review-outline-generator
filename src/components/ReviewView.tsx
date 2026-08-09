@@ -8,6 +8,7 @@ import {
   type SavedOutline,
 } from "@/components/view-types";
 import { cardStatus } from "@/components/shared-ui";
+import { renderMarkdown } from "@/lib/markdown";
 
 interface ReviewViewProps {
   isSignedIn: boolean | undefined;
@@ -400,17 +401,20 @@ export default function ReviewView({
                     </div>
                     {outlineViewId === o.id ? (
                       <>
-                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border p-3 text-sm leading-7"
+                        <div className="max-h-80 overflow-auto break-words rounded-xl border p-3 text-sm leading-7"
                           style={{
                             borderColor: 'rgba(255,255,255,0.05)',
                             background: 'rgba(0,0,0,0.2)',
                             color: 'var(--text-secondary)',
                           }}
-                        >
-                          {typeof o.result === "string"
-                            ? o.result
-                            : o.result?.outline || ""}
-                        </pre>
+                          dangerouslySetInnerHTML={{
+                            __html: renderMarkdown(
+                              typeof o.result === "string"
+                                ? o.result
+                                : o.result?.outline || ""
+                            ),
+                          }}
+                        />
                         <button onClick={() => setOutlineViewId(null)}
                           className="self-start text-xs underline opacity-60 hover:opacity-100"
                           style={{ color: 'var(--accent-teal)' }}
