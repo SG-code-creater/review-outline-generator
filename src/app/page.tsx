@@ -53,6 +53,10 @@ const ExamsView = dynamic(() => import("@/components/ExamsView"), {
   ssr: false,
   loading: () => <ViewSkeleton title="考试倒计时" />,
 });
+const PdfQaView = dynamic(() => import("@/components/PdfQaView"), {
+  ssr: false,
+  loading: () => <ViewSkeleton title="PDF 智能问答" />,
+});
 
 // ─── 图标 ──────────────────────────────────────────────
 const ICONS: Record<string, React.ReactNode> = {
@@ -137,7 +141,8 @@ const FEATURES = [
   {
     title: "PDF 智能问答",
     desc: "上传课件 PDF，直接提问，基于原文给出带出处的答案。",
-    live: false,
+    live: true,
+    mode: "pdfqa" as Mode,
   },
   {
     title: "单词背诵助手",
@@ -925,6 +930,7 @@ export default function Home() {
             { key: "mistakes" as Mode, label: "错题本", icon: "📕" },
             { key: "vocab" as Mode, label: "单词背诵", icon: "📚" },
             { key: "exam" as Mode, label: "考试倒计时", icon: "⏰" },
+            { key: "pdfqa" as Mode, label: "PDF 问答", icon: "📄" },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -1232,6 +1238,10 @@ export default function Home() {
 
         {mode === "exam" && (
           <ExamsView isSignedIn={isSignedIn} />
+        )}
+
+        {mode === "pdfqa" && (
+          <PdfQaView isSignedIn={isSignedIn} />
         )}
 
         {/* ─── 更多工具发现区（辅助入口，主导航已移至顶部 Tab 栏） ─── */}

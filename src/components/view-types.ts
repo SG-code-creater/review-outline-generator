@@ -1,6 +1,6 @@
 // 跨视图共享的类型定义（从 page.tsx 抽出，供懒加载子组件复用）
 
-export type Mode = "outline" | "flashcard" | "review" | "quiz" | "mistakes" | "vocab" | "exam";
+export type Mode = "outline" | "flashcard" | "review" | "quiz" | "mistakes" | "vocab" | "exam" | "pdfqa";
 
 export type ReviewView = "due" | "collection" | "outlines";
 
