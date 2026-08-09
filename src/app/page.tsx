@@ -391,6 +391,52 @@ export default function Home() {
     }
   }
 
+  // 从已生成的提纲一键派生：知识卡片 / 自测题（打通提纲→卡片→自测闭环）
+  async function deriveCards() {
+    if (!outline.trim()) return;
+    setLoading(true);
+    setCards([]);
+    try {
+      const res = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: outline, scenario }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "生成卡片失败，请稍后重试。");
+      setCards(data.cards || []);
+      switchMode("flashcard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成卡片失败，请稍后重试。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deriveQuiz() {
+    if (!outline.trim()) return;
+    setQuizLoading(true);
+    setQuiz([]);
+    setQuizPicked([]);
+    setQuizRevealed([]);
+    setSavedQuizIdx(new Set());
+    try {
+      const res = await fetch("/api/quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: outline, scenario, count: 5 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "生成自测题失败，请稍后重试。");
+      setQuiz(data.quiz || []);
+      switchMode("quiz");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成自测题失败，请稍后重试。");
+    } finally {
+      setQuizLoading(false);
+    }
+  }
+
   // 自测题：选择某选项（仅在未揭示时生效）
   function pickQuizOption(qi: number, oi: number) {
     if (quizRevealed[qi]) return;
@@ -478,6 +524,14 @@ export default function Home() {
   function exportAnki() {
     const lines = cards.map((c) => `${c.question}\t${c.answer}\t${c.topic}`);
     downloadFile("学盒闪卡_Anki导入.txt", lines.join("\n"), "text/plain");
+  }
+
+  // 导出为 Markdown（标题 + 答案 + 标签），便于带走 / 二次编辑
+  function exportCardsMd() {
+    const md = cards
+      .map((c, i) => `## ${i + 1}. ${c.question}\n\n**答案**：${c.answer}\n\n*标签*：${c.topic}`)
+      .join("\n\n");
+    downloadFile("知识卡片.md", md, "text/markdown");
   }
 
   async function copyAllCards() {
@@ -1093,6 +1147,32 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            {/* 一键联动：基于提纲派生卡片 / 自测题，打通学习闭环 */}
+            <div
+              className="flex flex-wrap items-center gap-2 border-t pt-3"
+              style={{ borderColor: "var(--glass-border)" }}
+            >
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                基于此提纲继续：
+              </span>
+              <button
+                onClick={deriveCards}
+                disabled={!outline.trim() || loading}
+                className="glass-btn px-3 py-1.5 text-xs disabled:opacity-50"
+                style={{ borderColor: "rgba(45,212,191,0.25)", color: "var(--accent-teal)" }}
+              >
+                {loading ? "生成中…" : "生成知识卡片"}
+              </button>
+              <button
+                onClick={deriveQuiz}
+                disabled={!outline.trim() || quizLoading}
+                className="glass-btn px-3 py-1.5 text-xs disabled:opacity-50"
+                style={{ borderColor: "rgba(167,139,250,0.25)", color: "var(--accent-purple)" }}
+              >
+                {quizLoading ? "生成中…" : "生成自测题"}
+              </button>
+            </div>
           </section>
         )}
 
@@ -1118,6 +1198,7 @@ export default function Home() {
                 )}
                 <button onClick={copyAllCards} className="text-xs underline opacity-60 hover:opacity-100" style={{ color: 'var(--accent-teal)' }}>复制全部</button>
                 <button onClick={exportAnki} className="text-xs underline opacity-60 hover:opacity-100" style={{ color: 'var(--accent-teal)' }}>导出 Anki</button>
+                <button onClick={exportCardsMd} className="text-xs underline opacity-60 hover:opacity-100" style={{ color: 'var(--accent-teal)' }}>下载 .md</button>
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>点击卡片翻转查看答案</span>
               </div>
             </div>

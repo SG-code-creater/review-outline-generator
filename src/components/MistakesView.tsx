@@ -75,11 +75,48 @@ export default function MistakesView({
 }: MistakesViewProps) {
   const [causeFilter, setCauseFilter] = useState<string>("all");
 
+  const exportMistakesMd = () => {
+    const md = mistakes
+      .map((m, i) => {
+        const opts = m.options
+          .map((o, oi) => `${String.fromCharCode(65 + oi)}. ${o}${oi === m.answer ? "（正确）" : ""}`)
+          .join("\n");
+        return (
+          `## ${i + 1}. ${m.question}\n\n${opts}\n\n` +
+          `**解析**：${m.explanation || "—"}\n` +
+          (m.cause ? `**错因**：${m.cause}\n` : "") +
+          (m.weak_point ? `**薄弱点**：${m.weak_point}\n` : "")
+        );
+      })
+      .join("\n\n");
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "错题本.md";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className="glass-card flex flex-col gap-4 p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>错题本</h2>
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>共 {mistakes.length} 题</span>
+        <div className="flex items-center gap-3">
+          {isSignedIn && mistakes.length > 0 && (
+            <button
+              type="button"
+              onClick={exportMistakesMd}
+              className="text-xs underline opacity-60 hover:opacity-100"
+              style={{ color: 'var(--accent-teal)' }}
+            >
+              导出 .md
+            </button>
+          )}
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>共 {mistakes.length} 题</span>
+        </div>
       </div>
 
       {!isSignedIn ? (
