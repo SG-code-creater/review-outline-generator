@@ -28,6 +28,11 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
   const [toast, setToast] = useState("");
   const [pendingSources, setPendingSources] = useState<number[]>([]);
 
+  // 最近打开的文档（登录后从 Supabase 持久化，支持免重新上传直接重开）
+  const [recentDocs, setRecentDocs] = useState<
+    { id: string; file_name: string; char_count: number; created_at: string; text: string }[]
+  >([]);
+
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +47,48 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, asking]);
 
+  // 进入页面时拉取最近文档（仅登录用户）
+  useEffect(() => {
+    if (isSignedIn) fetchRecent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn]);
+
+  async function fetchRecent() {
+    if (!isSignedIn) return;
+    try {
+      const res = await fetch("/api/recent-docs");
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.docs)) setRecentDocs(data.docs);
+    } catch {
+      /* 忽略：最近文档仅辅助，不影响主流程 */
+    }
+  }
+
+  async function recordRecent(name: string, text: string) {
+    if (!isSignedIn) return;
+    try {
+      await fetch("/api/recent-docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: name, text }),
+      });
+      fetchRecent();
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  function fmtRecentTime(iso: string) {
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const day = 24 * 3600 * 1000;
+    if (diffMs >= 0 && diffMs < day && d.getDate() === now.getDate())
+      return "今天 " + d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    if (diffMs >= 0 && diffMs < 2 * day) return "昨天";
+    return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  }
+
   function loadDoc(text: string, name: string) {
     const trimmed = text.replace(/\s+/g, " ").trim();
     if (trimmed.length < 20) {
@@ -54,6 +101,7 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
     setError("");
     setMessages([]);
     setToast(`已载入：${name}（${trimmed.length} 字，切 ${chunkText(trimmed).length} 段）`);
+    recordRecent(name, trimmed);
   }
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -147,9 +195,9 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl text-3xl"
             style={{ background: "rgba(96,165,250,0.12)", color: "var(--accent-blue)" }}>📄</div>
           <div>
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              支持 PDF 课件 / 讲义。文字在浏览器本地提取，不会上传你的文件。
-            </p>
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                支持 PDF 课件 / 讲义。文字在浏览器本地提取，不会传给第三方；登录后还会保存在你的账户里，便于下次直接重开。
+              </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-center">
             <button onClick={() => fileRef.current?.click()} disabled={extracting}
@@ -183,6 +231,32 @@ export default function PdfQaView({ isSignedIn }: { isSignedIn?: boolean }) {
             <p className="text-xs" style={{ color: "var(--accent-coral)" }}>{error}</p>
           )}
         </div>
+
+        {isSignedIn ? (
+          recentDocs.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>最近打开</p>
+              <div className="flex flex-wrap gap-2">
+                {recentDocs.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => loadDoc(d.text, d.file_name)}
+                    className="glass-btn flex items-center gap-2 px-3 py-2 text-left max-w-full transition-colors hover:border-[var(--accent-blue)]"
+                  >
+                    <span className="truncate text-sm" style={{ color: "var(--text-primary)" }}>{d.file_name}</span>
+                    <span className="shrink-0 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      {d.char_count} 字 · {fmtRecentTime(d.created_at)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        ) : (
+          <p className="text-xs text-center" style={{ color: "var(--text-muted)" }}>
+            登录后可保存最近打开的文档，下次免重新上传直接重开。
+          </p>
+        )}
       </section>
     );
   }
