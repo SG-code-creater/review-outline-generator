@@ -1216,6 +1216,54 @@ export default function Dashboard({
           </div>
         )}
       </div>
+
+      {/* 本周学习报告 */}
+      <div className="glass-card flex flex-col gap-3 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            本周学习报告
+          </h3>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            连续打卡 {stats.streak} 天
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div
+            className="flex flex-col gap-1 rounded-lg p-3"
+            style={{ background: "rgba(255,255,255,0.03)" }}
+          >
+            <span className="text-lg font-semibold" style={{ color: "var(--accent-teal)" }}>
+              {stats.daily.slice(-7).reduce((s, d) => s + d.count, 0)}
+            </span>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              本周学习次数
+            </span>
+          </div>
+          <div
+            className="flex flex-col gap-1 rounded-lg p-3"
+            style={{ background: "rgba(255,255,255,0.03)" }}
+          >
+            <span className="text-lg font-semibold" style={{ color: "var(--accent-purple)" }}>
+              {Math.round((stats.totalCards * stats.masteredPct) / 100)}
+            </span>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              已掌握卡片
+            </span>
+          </div>
+          <div
+            className="flex flex-col gap-1 rounded-lg p-3"
+            style={{ background: "rgba(255,255,255,0.03)" }}
+          >
+            <span className="text-lg font-semibold" style={{ color: "var(--accent-coral)" }}>
+              {stats.newMistakesWeek}
+            </span>
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              本周新增错题
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>我的仪表盘</h2>

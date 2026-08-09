@@ -12,6 +12,7 @@ export type StudyStats = {
   reviewedCards: number;
   masteredPct: number;
   daysActive: number;
+  newMistakesWeek: number;
   daily: { date: string; count: number }[];
   retentionSeries: number[];
 };
@@ -25,6 +26,7 @@ const EMPTY: StudyStats = {
   reviewedCards: 0,
   masteredPct: 0,
   daysActive: 0,
+  newMistakesWeek: 0,
   daily: [],
   retentionSeries: [],
 };

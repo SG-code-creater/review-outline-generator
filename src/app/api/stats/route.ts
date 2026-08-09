@@ -24,7 +24,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ loggedIn: true, dbReady: false }, { status: 200 });
 
   try {
-    const [{ data: usage }, { data: gens }, { data: cards }] = await Promise.all([
+    const since = new Date(Date.now() - 7 * 864e5).toISOString();
+    const [
+      { data: usage },
+      { data: gens },
+      { data: cards },
+      { count: newMistakes },
+    ] = await Promise.all([
       supabase.from("usage").select("created_at").eq("user_id", userId),
       supabase
         .from("generations")
@@ -35,6 +41,11 @@ export async function GET(req: NextRequest) {
         .from("cards")
         .select("created_at, last_reviewed, last_grade, due_at")
         .eq("user_id", userId),
+      supabase
+        .from("mistakes")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("created_at", since),
     ]);
 
     const activeSet = new Set<string>();
@@ -109,6 +120,7 @@ export async function GET(req: NextRequest) {
       reviewedCards,
       masteredPct,
       daysActive,
+      newMistakesWeek: newMistakes ?? 0,
       daily: days,
       retentionSeries,
     });
