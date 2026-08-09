@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { WORD_BOOKS } from "@/lib/wordbooks";
 import type { Card } from "@/components/view-types";
+import { renderMarkdown } from "@/lib/markdown";
 
 // 单词背诵视图：内置词书一键加入 + 翻卡背诵 + SM-2 间隔重复（复用 /api/cards/review）。
 // 数据全部落在 cards 表（tags 含 'vocab'），因此也会自动出现在「我的复习」里。
@@ -257,7 +258,7 @@ export default function VocabView({ isSignedIn }: { isSignedIn?: boolean }) {
                 </div>
               ) : (
                 <div className="flex flex-1 flex-col justify-center">
-                  <p className="whitespace-pre-wrap text-lg leading-relaxed" style={{ color: "var(--text-primary)" }}>{card.answer}</p>
+                  <div className="text-lg leading-relaxed" style={{ color: "var(--text-primary)" }} dangerouslySetInnerHTML={{ __html: renderMarkdown(card.answer) }} />
                   <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>点击返回单词 ↑</p>
                 </div>
               )}

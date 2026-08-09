@@ -13,7 +13,7 @@ function esc(s: string): string {
 
 /**
  * 将 Markdown 文本转为 HTML 字符串。
- * 支持：**bold**、*italic*、## 标题、- 列表、1. 有序列表、> 引用、[n] 引用标记清除、代码行内
+ * 支持：**bold**、*italic*、## 标题、- 列表、1. 有序列表、> 引用、[n] 引用标记清除、代码行内/块
  */
 export function renderMarkdown(raw: string): string {
   if (!raw) return "";
@@ -43,9 +43,8 @@ export function renderMarkdown(raw: string): string {
     // ── 代码块（```）── 跳过格式化，原样显示 ──
     if (trimmed.startsWith("```")) {
       closeLists();
-      // 找到闭合 ```
       let codeLines: string[] = [];
-      if (trimmed.length > 3) codeLines.push(trimmed.slice(3)); // 语言标记行
+      if (trimmed.length > 3) codeLines.push(trimmed.slice(3));
       i++;
       while (i < lines.length && !lines[i].trim().startsWith("```")) {
         codeLines.push(esc(lines[i]));
@@ -100,15 +99,37 @@ export function renderMarkdown(raw: string): string {
   return html.join("\n");
 }
 
-/** 行内格式：**b** *i* `code` [n]引用清理 */
+/**
+ * 行内格式化（在已转义的文本上操作）：
+ * 1. [n] 引用标记 → 上标
+ * 2. `code` → 行内代码
+ * 3. **bold** → 加粗（支持中文/标点紧邻）
+ * 4. *italic* → 斜体
+ */
 function inlineFormat(s: string): string {
-  // 清理 [1] [2] 这类引用标记（DeepSeek 常带出处编号）
-  s = s.replace(/\[(\d+)\]/g, '<sup style="color:var(--accent-teal);font-size:10px;margin-left:1px">$1</sup>');
-  // 行内代码
-  s = s.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:13px">$1</code>');
-  // 加粗 **text**
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // 斜体 *text*
-  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // ① [n] 或 [n-m] 引用标记 → 小上标（DeepSeek 带出处编号）
+  s = s.replace(/\[(\d+(?:-\d+)?)\]/g,
+    '<sup style="color:var(--accent-teal);font-size:10px;margin-left:1px">$1</sup>');
+
+  // ② 行内反引号代码
+  s = s.replace(/`([^`\n]+)`/g,
+    '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:13px">$1</code>');
+
+  // ③ **加粗** —— 匹配 **非星号内容**（支持中文/标点/空格）
+  //    反复执行直到无匹配（处理同一行多组 **...**）
+  let prev: string;
+  do {
+    prev = s;
+    s = s.replace(/\*\*(\S(?:[\s\S]*?\S)?)\*\*/g, "<strong>$1</strong>");
+  } while (s !== prev);
+
+  // ④ *斜体*（排除已处理的 <strong> 内部，且不在单词边界处误匹配星号乘法符号）
+  //    只匹配两侧有 Unicode 字母/汉字/标点的情况
+  do {
+    prev = s;
+    s = s.replace(/(?<=[\u4e00-\u9fff\w（）《》\"\'\(])\*(?!\*)([^\s*]+)\*(?=[\u4e00-\u9fff\w（）《》\"\'\),.，。！？：；])/g,
+      "<em>$1</em>");
+  } while (s !== prev);
+
   return s;
 }
