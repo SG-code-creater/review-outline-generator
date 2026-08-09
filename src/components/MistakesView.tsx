@@ -51,6 +51,7 @@ interface MistakesViewProps {
   setUploadMsg: (s: string) => void;
   uploadingMistakes: boolean;
   uploadMistakesToServer: () => void;
+  onGoQuiz?: () => void;
 }
 
 export default function MistakesView({
@@ -72,6 +73,7 @@ export default function MistakesView({
   setUploadMsg,
   uploadingMistakes,
   uploadMistakesToServer,
+  onGoQuiz,
 }: MistakesViewProps) {
   const [causeFilter, setCauseFilter] = useState<string>("all");
 
@@ -240,6 +242,7 @@ export default function MistakesView({
               title="错题本还是空的"
               description="去自测题答题（答错可自动收入），或直接在上方上传试卷 / 错题图片，AI 会帮你整理出知识点与正确答案。"
               accent="coral"
+              action={{ label: "去生成自测题", onClick: () => onGoQuiz?.() }}
             />
           ) : (
             <div className="flex flex-col gap-4">

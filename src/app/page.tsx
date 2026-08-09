@@ -1318,6 +1318,7 @@ export default function Home() {
           setUploadMsg={setUploadMsg}
           uploadingMistakes={uploadingMistakes}
           uploadMistakesToServer={uploadMistakesToServer}
+          onGoQuiz={() => switchMode("quiz")}
         />
         )}
 
